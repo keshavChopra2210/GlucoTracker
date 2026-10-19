@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GlucoPulse AI - Machine Learning & Predictive Modeling</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Chart.js for Simulation Curve -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script defer src="ml.js"></script>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <header class="navbar">
+        <a href="index.html" class="nav-brand">
+            <div class="brand-icon">🤖</div>
+            <div>
+                <span class="brand-title">GlucoPulse AI</span>
+                <span class="brand-badge">Health Intelligence</span>
+            </div>
+        </a>
+
+        <nav class="nav-links">
+            <a href="index.html" class="nav-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                Tracker & Log
+            </a>
+            <a href="analytics.html" class="nav-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                Data Analytics
+            </a>
+            <a href="ml.html" class="nav-item active">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+                Machine Learning & AI
+            </a>
+        </nav>
+
+        <div class="nav-right">
+            <div class="status-indicator">
+                <span class="status-dot"></span>
+                <span>Scikit-Learn ML Models Loaded</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="page-container">
+        <!-- Page Header -->
+        <div class="page-header">
+            <span class="page-tag">Predictive Analytics</span>
+            <h1 class="page-title">Machine Learning & Glycemic Forecaster</h1>
+            <p class="page-desc">Simulate and forecast evening blood glucose levels, evaluate multivariate regression models, and review scientific hypothesis tests (ANOVA & Shapiro-Wilk).</p>
+        </div>
+
+        <!-- Section 1: Interactive Glucose Predictor -->
+        <div class="predictor-layout">
+            <!-- Form Card -->
+            <div class="glass-card">
+                <div class="chart-title-group" style="margin-bottom: 20px;">
+                    <h3>Interactive Glycemic Predictor</h3>
+                    <p>Enter telemetry parameters to compute predicted evening glucose and risk index.</p>
+                </div>
+
+                <form id="predictionForm" onsubmit="event.preventDefault(); runPrediction();">
+                    <div class="form-group">
+                        <div class="form-label">
+                            <span>Prior Night Sleep Duration</span>
+                            <span class="form-label-val" id="sleepValLabel">7.5 hrs</span>
+                        </div>
+                        <input type="range" id="inputSleep" min="3.0" max="12.0" step="0.1" value="7.5" class="range-slider" oninput="updateSleepLabel(this.value)">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            <span>Morning Sugar (Fasting)</span>
+                            <span class="form-label-val">mg/dL</span>
+                        </label>
+                        <input type="number" id="inputMorning" class="form-input" value="115" min="50" max="400" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            <span>Afternoon Sugar (Post-Lunch)</span>
+                            <span class="form-label-val">mg/dL</span>
+                        </label>
+                        <input type="number" id="inputAfternoon" class="form-input" value="130" min="50" max="400" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            <span>Physical Activity Context</span>
+                        </label>
+                        <select id="inputActivity" class="form-input" style="cursor: pointer;">
+                            <option value="moderate" selected>Moderate Daily Activity</option>
+                            <option value="sedentary">Sedentary / Desk Bound</option>
+                            <option value="active">High Physical Activity / Exercise</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; gap: 12px; margin-top: 24px;">
+                        <button type="submit" class="btn btn-primary" style="flex: 1;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                            Compute ML Prediction
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Prediction Result Card -->
+            <div class="glass-card prediction-result-card">
+                <div>
+                    <div class="chart-title-group" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h3>Projected Glycemic Control</h3>
+                            <p>Real-time machine learning inference</p>
+                        </div>
+                        <span class="kpi-badge badge-success" id="predRiskBadge">Optimal Control</span>
+                    </div>
+
+                    <!-- SVG Speedometer Gauge -->
+                    <div class="gauge-container">
+                        <svg width="220" height="120" viewBox="0 0 220 120">
+                            <!-- Background Arc -->
+                            <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="18" stroke-linecap="round" />
+                            <!-- Colored Zones -->
+                            <path d="M 20 110 A 90 90 0 0 1 70 38" fill="none" stroke="#8b5cf6" stroke-width="16" stroke-linecap="round" />
+                            <path d="M 70 38 A 90 90 0 0 1 150 38" fill="none" stroke="#10b981" stroke-width="16" />
+                            <path d="M 150 38 A 90 90 0 0 1 200 110" fill="none" stroke="#ef4444" stroke-width="16" stroke-linecap="round" />
+                            
+                            <!-- Gauge Needle -->
+                            <g id="gaugeNeedle" transform="rotate(-20, 110, 110)" style="transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);">
+                                <line x1="110" y1="110" x2="110" y2="30" stroke="#f8fafc" stroke-width="3" stroke-linecap="round" />
+                                <circle cx="110" cy="110" r="7" fill="#06b6d4" />
+                            </g>
+                        </svg>
+                        <div style="display: flex; justify-content: space-between; width: 220px; font-size: 11px; color: var(--text-dim); margin-top: -6px;">
+                            <span>Low (&lt;70)</span>
+                            <span style="color: #10b981; font-weight: 600;">Normal (70-140)</span>
+                            <span>High (&gt;180)</span>
+                        </div>
+                    </div>
+
+                    <!-- Prediction Stats Highlights -->
+                    <div class="prediction-highlight-row">
+                        <div class="pred-stat-box">
+                            <div class="pred-stat-label">Predicted Evening Glucose</div>
+                            <div class="pred-stat-num" style="color: #38bdf8;" id="predEveningVal">123.8 <span style="font-size: 14px; font-weight: 400; color: var(--text-dim);">mg/dL</span></div>
+                        </div>
+                        <div class="pred-stat-box">
+                            <div class="pred-stat-label">Estimated Daily Mean</div>
+                            <div class="pred-stat-num" style="color: #34d399;" id="predMeanVal">122.9 <span style="font-size: 14px; font-weight: 400; color: var(--text-dim);">mg/dL</span></div>
+                        </div>
+                    </div>
+
+                    <div style="font-size: 12px; color: var(--text-dim); text-align: center;">
+                        95% Confidence Interval: <strong id="predCI" style="color: var(--text-main);">109.6 &ndash; 138.0 mg/dL</strong>
+                    </div>
+                </div>
+
+                <!-- AI Recommendations -->
+                <div class="recommendations-box">
+                    <div class="recommendations-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"></path></svg>
+                        Personalized Clinical Recommendations
+                    </div>
+                    <ul class="recommendations-list" id="predRecommendations">
+                        <li>Sleep Range Optimal: 7.5 hours provides healthy restorative rest for glycemic regulation.</li>
+                        <li>Evening Stability: Projected evening glucose remains comfortably within the target ADA range.</li>
+                        <li>Consider a light post-dinner 15-minute walk to enhance cellular glucose uptake.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: "What-If" Sleep Simulation Engine -->
+        <div class="glass-card" style="margin-bottom: 28px;">
+            <div class="chart-card-header">
+                <div class="chart-title-group">
+                    <h3>"What-If" Sleep Duration Simulation Engine</h3>
+                    <p>Observe how shifting sleep duration from 4 to 10 hours changes projected metabolic impact across daytime glucose.</p>
+                </div>
+            </div>
+
+            <div class="chart-canvas-wrapper" style="height: 280px;">
+                <canvas id="simulationChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Section 3: Model Diagnostics & Scientific Hypothesis Testing -->
+        <div class="charts-grid">
+            <div class="glass-card col-6">
+                <div class="chart-card-header">
+                    <div class="chart-title-group">
+                        <h3>Linear Regression Model (OLS)</h3>
+                        <p>Mathematical modeling of Sleep Duration &rarr; Mean Blood Glucose.</p>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <span class="kpi-badge badge-primary" id="datasetSizeBadge">n = 500 records</span>
+                        <span class="kpi-badge badge-primary">Scikit-Learn</span>
+                    </div>
+                </div>
+
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 18px; margin-bottom: 16px;">
+                    <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 4px;">Regression Equation</div>
+                    <div id="regressionEquation" style="font-family: 'Consolas', monospace; font-size: 16px; color: #38bdf8; font-weight: 600;">
+                        Mean Glucose = 124.54 + 0.0853 &times; (Sleep Hours)
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center;">
+                    <div class="pred-stat-box">
+                        <div class="pred-stat-label">R&sup2; Score</div>
+                        <div class="pred-stat-num" id="metricR2" style="font-size: 20px;">-0.0054</div>
+                    </div>
+                    <div class="pred-stat-box">
+                        <div class="pred-stat-label">MAE</div>
+                        <div class="pred-stat-num" id="metricMAE" style="font-size: 20px; color: #34d399;">10.68</div>
+                        <div style="font-size: 11px; color: var(--text-dim);">mg/dL</div>
+                    </div>
+                    <div class="pred-stat-box">
+                        <div class="pred-stat-label">RMSE</div>
+                        <div class="pred-stat-num" id="metricRMSE" style="font-size: 20px;">13.07</div>
+                        <div style="font-size: 11px; color: var(--text-dim);">mg/dL</div>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 14px; line-height: 1.5;">
+                    The flat slope indicates that in this patient dataset, sleep duration operates within a well-stabilized range with minimal linear variance on baseline composite glucose.
+                </p>
+            </div>
+
+            <!-- Hypothesis Testing: ANOVA & Normality -->
+            <div class="glass-card col-6">
+                <div class="chart-card-header">
+                    <div class="chart-title-group">
+                        <h3>One-Way ANOVA & Normality Tests</h3>
+                        <p>SciPy Statistical Hypothesis Validation (From analysis.py).</p>
+                    </div>
+                    <span class="kpi-badge badge-warning">SciPy Stats</span>
+                </div>
+
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 18px; margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600;">One-Way ANOVA (Low vs Medium vs High Sleep)</span>
+                        <span class="kpi-badge badge-primary" id="anovaBadge">F = 0.5115, p = 0.5999</span>
+                    </div>
+                    <p id="anovaInterpretation" style="font-size: 13px; color: var(--text-muted);">
+                        <strong>Conclusion:</strong> Since <em>p = 0.5999 &gt; 0.05</em>, we fail to reject the null hypothesis. There is no statistically significant difference in mean blood sugar across sleep duration cohorts.
+                    </p>
+                </div>
+
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px;">Shapiro-Wilk Normality Test:</div>
+                <div id="shapiroWilkRows" style="display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+                    <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                        <span>Low Sleep (&lt;6h, n=113)</span>
+                        <span>W = 0.9799, p = 0.0865 <strong style="color: #34d399;">&rarr; Normal (p &gt; 0.05)</strong></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                        <span>Medium Sleep (6-8h, n=256)</span>
+                        <span>W = 0.9956, p = 0.6882 <strong style="color: #34d399;">&rarr; Normal (p &gt; 0.05)</strong></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                        <span>High Sleep (&ge;8h, n=131)</span>
+                        <span>W = 0.9862, p = 0.2110 <strong style="color: #34d399;">&rarr; Normal (p &gt; 0.05)</strong></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 4: Live Python Execution Runner & Boxplot Display -->
+        <div class="glass-card">
+            <div class="chart-card-header">
+                <div class="chart-title-group">
+                    <h3>Live Python Engine (analysis.py) Runner</h3>
+                    <p>Execute the Python statistical script directly and inspect terminal execution and Seaborn boxplots.</p>
+                </div>
+                <button class="btn btn-primary" id="btnRunPython" onclick="executePythonAnalysis()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    Run Python Script (analysis.py)
+                </button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
+                <!-- Terminal Output -->
+                <div class="terminal-window">
+                    <div class="terminal-header">
+                        <span class="term-dot term-red"></span>
+                        <span class="term-dot term-yellow"></span>
+                        <span class="term-dot term-green"></span>
+                        <span class="term-title">python analysis.py &mdash; Terminal Output</span>
+                    </div>
+                    <div class="terminal-body" id="pythonTerminalOutput">
+Click "Run Python Script" to execute analysis.py in real-time...
+                    </div>
+                </div>
+
+                <!-- Generated Seaborn Plot Image -->
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; text-align: center;">
+                    <div style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px;">
+                        Generated Seaborn Cohort Boxplot (sleep_sugar_boxplot.png)
+                    </div>
+                    <img id="pythonBoxplotImg" src="sleep_sugar_boxplot.png" alt="Seaborn Boxplot" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);" onerror="this.style.display='none'; document.getElementById('plotPlaceholder').style.display='block';">
+                    <div id="plotPlaceholder" style="display: none; padding: 40px; color: var(--text-dim); font-size: 13px;">
+                        Plot not generated yet. Click "Run Python Script" above.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        GlucoPulse AI &mdash; Diabetes Intelligence Platform &nbsp;|&nbsp;
+        Built with Node.js, Python scikit-learn &amp; Chart.js &nbsp;|&nbsp;
+        Data is for research purposes only. Consult a medical professional for clinical decisions.
+    </footer>
+</body>
+</html>

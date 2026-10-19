@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GlucoPulse AI - Diabetes Health & Record Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="record.js"></script>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <header class="navbar">
+        <a href="index.html" class="nav-brand">
+            <div class="brand-icon">🩸</div>
+            <div>
+                <span class="brand-title">GlucoPulse AI</span>
+                <span class="brand-badge">Health Intelligence</span>
+            </div>
+        </a>
+
+        <nav class="nav-links">
+            <a href="index.html" class="nav-item active">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                Tracker & Log
+            </a>
+            <a href="analytics.html" class="nav-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                Data Analytics
+            </a>
+            <a href="ml.html" class="nav-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+                Machine Learning & AI
+            </a>
+        </nav>
+
+        <div class="nav-right">
+            <div class="status-indicator">
+                <span class="status-dot"></span>
+                <span>System Online (Port 3000)</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="page-container">
+        <!-- Page Header -->
+        <div class="page-header">
+            <span class="page-tag">Clinical Monitoring</span>
+            <h1 class="page-title">Diabetes Control & Sleep Log</h1>
+            <p class="page-desc">Track and audit daily blood glucose readings alongside sleep duration to detect patterns and maintain optimal glycemic control.</p>
+        </div>
+
+        <!-- Summary KPIs -->
+        <div class="kpi-grid">
+            <div class="glass-card kpi-card">
+                <div class="kpi-header">
+                    <span class="kpi-title">Total Records</span>
+                    <span class="kpi-icon">📁</span>
+                </div>
+                <div class="kpi-value-row">
+                    <span class="kpi-value" id="kpiTotalEntries">500</span>
+                    <span class="kpi-unit">days</span>
+                </div>
+                <span class="kpi-badge badge-primary">Historical Dataset</span>
+            </div>
+
+            <div class="glass-card kpi-card">
+                <div class="kpi-header">
+                    <span class="kpi-title">Mean Daily Glucose</span>
+                    <span class="kpi-icon">💉</span>
+                </div>
+                <div class="kpi-value-row">
+                    <span class="kpi-value" id="kpiAvgSugar">125.1</span>
+                    <span class="kpi-unit">mg/dL</span>
+                </div>
+                <span class="kpi-badge badge-success" id="kpiHealthStatus">Optimal Control (<140)</span>
+            </div>
+
+            <div class="glass-card kpi-card">
+                <div class="kpi-header">
+                    <span class="kpi-title">Average Sleep</span>
+                    <span class="kpi-icon">🌙</span>
+                </div>
+                <div class="kpi-value-row">
+                    <span class="kpi-value" id="kpiAvgSleep">7.0</span>
+                    <span class="kpi-unit">hrs / night</span>
+                </div>
+                <span class="kpi-badge badge-primary">Healthy Rest Duration</span>
+            </div>
+
+            <div class="glass-card kpi-card">
+                <div class="kpi-header">
+                    <span class="kpi-title">Glycemic Target</span>
+                    <span class="kpi-icon">🎯</span>
+                </div>
+                <div class="kpi-value-row">
+                    <span class="kpi-value">70 - 140</span>
+                    <span class="kpi-unit">mg/dL</span>
+                </div>
+                <span class="kpi-badge badge-success">ADA Clinical Standard</span>
+            </div>
+        </div>
+
+        <!-- Table Card -->
+        <div class="glass-card">
+            <!-- Table Controls -->
+            <div class="table-controls">
+                <div class="search-input-wrap">
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" id="searchInput" class="search-input" placeholder="Search by date (e.g. 2023-10)...">
+                </div>
+
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <label style="font-size: 13px; color: var(--text-dim);">Rows:</label>
+                    <select onchange="changePageSize(this.value)" class="table-input" style="width: auto; padding: 8px 12px;">
+                        <option value="15" selected>15</option>
+                        <option value="30">30</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+
+                    <button class="btn btn-primary" onclick="openAddModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        Add Entry
+                    </button>
+                    <button class="btn btn-secondary" onclick="saveCSVToServer()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                        Save to Server
+                    </button>
+                    <button class="btn btn-secondary" onclick="downloadCSV()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        Download CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="table-responsive">
+                <table id="trackerTable">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Sleep Duration</th>
+                            <th>Morning Sugar (Fasting)</th>
+                            <th>Afternoon Sugar (Post-Lunch)</th>
+                            <th>Evening Sugar (Post-Dinner)</th>
+                            <th>Daily Mean</th>
+                            <th>Glycemic Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td colspan="8" style="text-align: center; padding: 24px; color: var(--text-dim);">Loading patient telemetry...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination-wrap">
+                <span class="page-info" id="paginationInfo">Showing 1 to 15 of 500 entries</span>
+                <div class="pagination-buttons">
+                    <button class="btn btn-secondary btn-sm" id="prevPageBtn" onclick="prevPage()">Previous</button>
+                    <button class="btn btn-secondary btn-sm" id="nextPageBtn" onclick="nextPage()">Next</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal for Adding Entry -->
+    <div class="modal-overlay" id="addEntryModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Log New Blood Glucose Entry</h3>
+                <button class="modal-close" onclick="closeAddModal()">&times;</button>
+            </div>
+            <form id="addEntryForm">
+                <div class="form-group">
+                    <label class="form-label">Record Date</label>
+                    <input type="date" id="entryDate" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Sleep Hours (Night Prior)</label>
+                    <input type="number" step="0.1" min="0" max="24" id="entrySleep" class="form-input" placeholder="e.g. 7.5" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Morning Sugar Level (mg/dL)</label>
+                    <input type="number" min="40" max="500" id="entryMorning" class="form-input" placeholder="e.g. 115" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Afternoon Sugar Level (mg/dL)</label>
+                    <input type="number" min="40" max="500" id="entryAfternoon" class="form-input" placeholder="e.g. 130" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Evening Sugar Level (mg/dL)</label>
+                    <input type="number" min="40" max="500" id="entryEvening" class="form-input" placeholder="e.g. 125" required>
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Entry</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        GlucoPulse AI &mdash; Diabetes Intelligence Platform &nbsp;|&nbsp;
+        Built with Node.js, Python scikit-learn &amp; Chart.js &nbsp;|&nbsp;
+        Data is for research purposes only. Consult a medical professional for clinical decisions.
+    </footer>
+</body>
+</html>
