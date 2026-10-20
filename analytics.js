@@ -1,434 +1,320 @@
-// Data Analytics Visualizations Engine
+// ── GlucoPulse AI — Analytics (Pima Indians Dataset) ──────────────────────
 let analyticsData = null;
-let rawRecords = [];
-let chartInstances = {};
+let rawRecords    = [];
+const charts = {};
 
-document.addEventListener("DOMContentLoaded", () => {
-    initAnalytics();
-});
+const ACCENT = {
+    diabetic:    "rgba(239,68,68,0.85)",
+    nonDiabetic: "rgba(16,185,129,0.85)",
+    primary:     "rgba(99,102,241,0.85)",
+    amber:       "rgba(245,158,11,0.85)",
+    sky:         "rgba(56,189,248,0.85)",
+    grid:        "rgba(255,255,255,0.06)",
+    gridLine:    "rgba(255,255,255,0.08)"
+};
+
+Chart.defaults.color = "#94a3b8";
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+
+document.addEventListener("DOMContentLoaded", initAnalytics);
 
 async function initAnalytics() {
     try {
         const res = await fetch("/api/analytics");
         if (res.ok) {
             analyticsData = await res.json();
-            if (analyticsData.records) {
-                rawRecords = analyticsData.records;
-            }
+            rawRecords = analyticsData.records || [];
         }
-    } catch (err) {
-        console.warn("Analytics API endpoint error, fetching records directly...", err);
+    } catch (e) {
+        console.warn("API unavailable, loading CSV…");
     }
 
-    if (!analyticsData || !analyticsData.records || analyticsData.records.length === 0) {
-        // Fallback: load records and calculate locally
-        await loadAndComputeLocalAnalytics();
+    if (!analyticsData || !analyticsData.kpis) {
+        await loadFromCSV();
     }
 
-    renderAllCharts();
+    if (!analyticsData) return;
+    updateKPIs();
+    renderOutcomeChart();
+    renderGlucoseDistChart();
+    renderBMIChart();
+    renderAgeChart();
+    renderPregChart();
+    renderScatterChart();
+    buildStatsTable();
 }
 
-async function loadAndComputeLocalAnalytics() {
+// ── CSV Fallback ─────────────────────────────────────────────────────────────
+async function loadFromCSV() {
     try {
-        const res = await fetch("diabetes_data.csv");
+        const res  = await fetch("diabetes_data.csv");
         const text = await res.text();
         const lines = text.trim().split(/\r?\n/);
         rawRecords = [];
         for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split(",").map(c => c.trim());
-            if (cols.length < 5) continue;
-            const date = cols[0];
-            const sleep = parseFloat(cols[1]) || 0;
-            const morn = parseFloat(cols[2]) || 0;
-            const aft = parseFloat(cols[3]) || 0;
-            const eve = parseFloat(cols[4]) || 0;
-            const mean = parseFloat(((morn + aft + eve) / 3).toFixed(2));
+            const c = lines[i].split(",").map(s => s.trim());
+            if (c.length < 9) continue;
             rawRecords.push({
-                date,
-                sleepHours: sleep,
-                morningSugar: morn,
-                afternoonSugar: aft,
-                eveningSugar: eve,
-                meanSugar: mean
+                patientId:     c[0],
+                pregnancies:   parseFloat(c[1]) || 0,
+                glucose:       parseFloat(c[2]) || 0,
+                bloodPressure: parseFloat(c[3]) || 0,
+                skinThickness: parseFloat(c[4]) || 0,
+                insulin:       parseFloat(c[5]) || 0,
+                bmi:           parseFloat(c[6]) || 0,
+                pedigree:      parseFloat(c[7]) || 0,
+                age:           parseInt(c[8])   || 0,
+                outcome:       parseInt(c[9])   || 0
             });
         }
-    } catch (e) {
-        console.error("Local CSV parsing failed:", e);
+        computeAnalyticsLocally();
+    } catch (e) { console.error(e); }
+}
+
+function computeAnalyticsLocally() {
+    const n = rawRecords.length;
+    if (!n) return;
+
+    const avg  = f => rawRecords.reduce((s, r) => s + r[f], 0) / n;
+    const avgG = parseFloat(avg("glucose").toFixed(2));
+    const diabeticCount    = rawRecords.filter(r => r.outcome === 1).length;
+    const nonDiabeticCount = n - diabeticCount;
+
+    analyticsData = {
+        kpis: {
+            totalCount: n, diabeticCount, nonDiabeticCount,
+            diabeticRate: parseFloat((diabeticCount / n * 100).toFixed(1)),
+            avgGlucose: avgG,
+            avgBMI:     parseFloat(avg("bmi").toFixed(2)),
+            avgAge:     parseFloat(avg("age").toFixed(1)),
+            avgInsulin: parseFloat(avg("insulin").toFixed(1)),
+            avgBP:      parseFloat(avg("bloodPressure").toFixed(1)),
+            stdGlucose: 0
+        },
+        glucoseDistribution: {
+            normalCount:    rawRecords.filter(r => r.glucose < 100).length,
+            preDiabCount:   rawRecords.filter(r => r.glucose >= 100 && r.glucose < 126).length,
+            diabRangeCount: rawRecords.filter(r => r.glucose >= 126).length
+        },
+        bmiGroups: {
+            underweight: rawRecords.filter(r => r.bmi < 18.5).length,
+            normal:      rawRecords.filter(r => r.bmi >= 18.5 && r.bmi < 25).length,
+            overweight:  rawRecords.filter(r => r.bmi >= 25 && r.bmi < 30).length,
+            obese:       rawRecords.filter(r => r.bmi >= 30).length
+        },
+        ageGroups: {
+            "21-30": rawRecords.filter(r => r.age >= 21 && r.age <= 30).length,
+            "31-40": rawRecords.filter(r => r.age >= 31 && r.age <= 40).length,
+            "41-50": rawRecords.filter(r => r.age >= 41 && r.age <= 50).length,
+            "51-60": rawRecords.filter(r => r.age >= 51 && r.age <= 60).length,
+            "61+":   rawRecords.filter(r => r.age >= 61).length
+        },
+        pregCohorts: buildPregCohorts(),
+        records: rawRecords
+    };
+}
+
+function buildPregCohorts() {
+    const def = { "0": r => r.pregnancies === 0, "1-3": r => r.pregnancies >= 1 && r.pregnancies <= 3,
+                  "4-6": r => r.pregnancies >= 4 && r.pregnancies <= 6, "7+": r => r.pregnancies >= 7 };
+    const out = {};
+    for (const [k, fn] of Object.entries(def)) {
+        const grp = rawRecords.filter(fn);
+        const d   = grp.filter(r => r.outcome === 1).length;
+        out[k] = { count: grp.length, diabeticRate: grp.length ? parseFloat((d / grp.length * 100).toFixed(1)) : 0 };
+    }
+    return out;
+}
+
+// ── KPI update ───────────────────────────────────────────────────────────────
+function updateKPIs() {
+    const k = analyticsData.kpis;
+    setEl("aKpiDiabeticRate", k.diabeticRate);
+    setEl("aKpiAvgGlucose",   k.avgGlucose);
+    setEl("aKpiAvgBMI",       k.avgBMI);
+    setEl("aKpiAvgAge",       k.avgAge);
+    setEl("aKpiAvgInsulin",   k.avgInsulin);
+
+    // Dynamically update the diabetic count badge (e.g. "268 / 768")
+    const diabeticBadge = document.querySelector("#aKpiDiabeticRate")?.closest(".kpi-card")?.querySelector(".kpi-badge");
+    if (diabeticBadge) diabeticBadge.textContent = `${k.diabeticCount} / ${k.totalCount}`;
+
+    // Glucose status badge
+    const glucoseBadge = document.querySelector("#aKpiAvgGlucose")?.closest(".kpi-card")?.querySelector(".kpi-badge");
+    if (glucoseBadge) {
+        const g = k.avgGlucose;
+        if (g < 100)       { glucoseBadge.textContent = "Normal Range";      glucoseBadge.className = "kpi-badge badge-success"; }
+        else if (g < 126)  { glucoseBadge.textContent = "Pre-Diabetic Range"; glucoseBadge.className = "kpi-badge badge-warning"; }
+        else               { glucoseBadge.textContent = "Diabetic Range";     glucoseBadge.className = "kpi-badge badge-danger"; }
     }
 }
-
-function renderAllCharts(filterCount = null) {
-    let dataset = [...rawRecords];
-    if (filterCount && filterCount < dataset.length) {
-        dataset = dataset.slice(-filterCount);
-    }
-
-    renderTrajectoryChart(dataset);
-    renderDiurnalChart(dataset);
-    renderTIRDonut(dataset);
-    renderScatterPlot(dataset);
-    renderCohortChart(dataset);
-    updateDynamicKPIs(dataset);
+function setEl(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
 }
 
-function updateDynamicKPIs(records) {
-    if (!records || records.length === 0) return;
-    const n = records.length;
-    const avgGlucose = (records.reduce((s, r) => s + r.meanSugar, 0) / n).toFixed(1);
-    const avgSleep = (records.reduce((s, r) => s + r.sleepHours, 0) / n).toFixed(2);
-    
-    // Variance & StdDev
-    const variance = records.reduce((s, r) => s + Math.pow(r.meanSugar - avgGlucose, 2), 0) / n;
-    const stdDev = Math.sqrt(variance);
-    const cv = ((stdDev / avgGlucose) * 100).toFixed(1);
-
-    // In Range (70-140)
-    const inRange = records.filter(r => r.meanSugar >= 70 && r.meanSugar <= 140).length;
-    const tir = ((inRange / n) * 100).toFixed(1);
-
-    // eA1c
-    const ea1c = ((parseFloat(avgGlucose) + 46.7) / 28.7).toFixed(1);
-
-    const elAvg = document.getElementById("anaAvgGlucose");
-    const elTir = document.getElementById("anaTIR");
-    const elEa1c = document.getElementById("anaEA1C");
-    const elSleep = document.getElementById("anaAvgSleep");
-    const elCv = document.getElementById("anaCV");
-
-    if (elAvg) elAvg.innerText = avgGlucose;
-    if (elTir) elTir.innerText = tir;
-    if (elEa1c) elEa1c.innerText = ea1c;
-    if (elSleep) elSleep.innerText = avgSleep;
-    if (elCv) elCv.innerText = cv;
+// ── Chart helpers ─────────────────────────────────────────────────────────────
+function chartOpts(extra = {}) {
+    return {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: { legend: { labels: { color: "#94a3b8", padding: 16, font: { size: 12 } } }, tooltip: { backgroundColor: "#1e293b", titleColor: "#f1f5f9", bodyColor: "#94a3b8" } },
+        ...extra
+    };
 }
 
-function renderTrajectoryChart(records) {
-    const ctx = document.getElementById("trajectoryChart")?.getContext("2d");
-    if (!ctx) return;
-    if (chartInstances.trajectory) chartInstances.trajectory.destroy();
-
-    const labels = records.map(r => r.date.substring(5)); // MM-DD
-    const meanData = records.map(r => r.meanSugar);
-    const mornData = records.map(r => r.morningSugar);
-    const aftData = records.map(r => r.afternoonSugar);
-    const eveData = records.map(r => r.eveningSugar);
-    const sleepData = records.map(r => r.sleepHours);
-
-    // Target Range Band background
-    const lowerTarget = Array(records.length).fill(70);
-    const upperTarget = Array(records.length).fill(140);
-
-    chartInstances.trajectory = new Chart(ctx, {
-        type: "line",
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: "Daily Mean Glucose",
-                    data: meanData,
-                    borderColor: "#06b6d4",
-                    backgroundColor: "rgba(6, 182, 212, 0.15)",
-                    borderWidth: 2.5,
-                    pointRadius: records.length > 50 ? 0 : 3,
-                    tension: 0.3,
-                    yAxisID: "y"
-                },
-                {
-                    label: "Morning (Fasting)",
-                    data: mornData,
-                    borderColor: "#eab308",
-                    borderWidth: 1.5,
-                    borderDash: [4, 4],
-                    pointRadius: 0,
-                    tension: 0.3,
-                    yAxisID: "y"
-                },
-                {
-                    label: "Afternoon",
-                    data: aftData,
-                    borderColor: "#3b82f6",
-                    borderWidth: 1.5,
-                    borderDash: [4, 4],
-                    pointRadius: 0,
-                    tension: 0.3,
-                    yAxisID: "y"
-                },
-                {
-                    label: "Evening",
-                    data: eveData,
-                    borderColor: "#a855f7",
-                    borderWidth: 1.5,
-                    borderDash: [4, 4],
-                    pointRadius: 0,
-                    tension: 0.3,
-                    yAxisID: "y"
-                },
-                {
-                    label: "Sleep Duration (hrs)",
-                    data: sleepData,
-                    borderColor: "rgba(148, 163, 184, 0.4)",
-                    backgroundColor: "rgba(148, 163, 184, 0.1)",
-                    borderWidth: 1,
-                    pointRadius: 0,
-                    tension: 0.2,
-                    yAxisID: "ySleep"
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: "index", intersect: false },
-            plugins: {
-                legend: {
-                    labels: { color: "#94a3b8", boxWidth: 12, font: { family: "Inter", size: 12 } }
-                },
-                tooltip: {
-                    backgroundColor: "rgba(15, 23, 42, 0.9)",
-                    titleColor: "#f8fafc",
-                    bodyColor: "#94a3b8",
-                    borderColor: "rgba(255, 255, 255, 0.1)",
-                    borderWidth: 1
-                }
-            },
-            scales: {
-                x: {
-                    grid: { color: "rgba(255, 255, 255, 0.05)" },
-                    ticks: { color: "#64748b", maxTicksLimit: 12 }
-                },
-                y: {
-                    position: "left",
-                    title: { display: true, text: "Glucose Level (mg/dL)", color: "#94a3b8" },
-                    grid: { color: "rgba(255, 255, 255, 0.05)" },
-                    ticks: { color: "#64748b" },
-                    min: 70,
-                    max: 180
-                },
-                ySleep: {
-                    position: "right",
-                    title: { display: true, text: "Sleep (Hours)", color: "#94a3b8" },
-                    grid: { drawOnChartArea: false },
-                    ticks: { color: "#64748b" },
-                    min: 0,
-                    max: 14
-                }
-            }
-        }
-    });
-}
-
-function renderDiurnalChart(records) {
-    const ctx = document.getElementById("diurnalChart")?.getContext("2d");
-    if (!ctx) return;
-    if (chartInstances.diurnal) chartInstances.diurnal.destroy();
-
-    const mornAvg = (records.reduce((s, r) => s + r.morningSugar, 0) / records.length).toFixed(1);
-    const aftAvg = (records.reduce((s, r) => s + r.afternoonSugar, 0) / records.length).toFixed(1);
-    const eveAvg = (records.reduce((s, r) => s + r.eveningSugar, 0) / records.length).toFixed(1);
-
-    chartInstances.diurnal = new Chart(ctx, {
-        type: "bar",
-        data: {
-            labels: ["Morning (Fasting)", "Afternoon (Post-Lunch)", "Evening (Post-Dinner)"],
-            datasets: [{
-                label: "Average Glucose (mg/dL)",
-                data: [mornAvg, aftAvg, eveAvg],
-                backgroundColor: [
-                    "rgba(234, 179, 8, 0.7)",
-                    "rgba(59, 130, 246, 0.7)",
-                    "rgba(168, 85, 247, 0.7)"
-                ],
-                borderColor: ["#eab308", "#3b82f6", "#a855f7"],
-                borderWidth: 1.5,
-                borderRadius: 8
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
-                y: {
-                    min: 80,
-                    max: 150,
-                    ticks: { color: "#64748b" },
-                    grid: { color: "rgba(255, 255, 255, 0.05)" },
-                    title: { display: true, text: "mg/dL", color: "#94a3b8" }
-                }
-            }
-        }
-    });
-}
-
-function renderTIRDonut(records) {
-    const ctx = document.getElementById("tirDonutChart")?.getContext("2d");
-    if (!ctx) return;
-    if (chartInstances.tir) chartInstances.tir.destroy();
-
-    let low = 0, normal = 0, elevated = 0, high = 0;
-    records.forEach(r => {
-        if (r.meanSugar < 70) low++;
-        else if (r.meanSugar <= 140) normal++;
-        else if (r.meanSugar <= 180) elevated++;
-        else high++;
-    });
-
-    chartInstances.tir = new Chart(ctx, {
+// 1. Outcome Donut
+function renderOutcomeChart() {
+    const { diabeticCount, nonDiabeticCount } = analyticsData.kpis;
+    charts.outcome = new Chart(document.getElementById("outcomeChart"), {
         type: "doughnut",
         data: {
-            labels: ["Normal (70-140 mg/dL)", "Elevated (141-180 mg/dL)", "High Risk (>180 mg/dL)", "Low / Hypo (<70 mg/dL)"],
-            datasets: [{
-                data: [normal, elevated, high, low],
-                backgroundColor: [
-                    "#10b981", // Green
-                    "#f59e0b", // Amber
-                    "#ef4444", // Red
-                    "#8b5cf6"  // Purple
-                ],
-                borderWidth: 0,
-                hoverOffset: 8
-            }]
+            labels: ["Diabetic (1)", "Non-Diabetic (0)"],
+            datasets: [{ data: [diabeticCount, nonDiabeticCount],
+                         backgroundColor: [ACCENT.diabetic, ACCENT.nonDiabetic],
+                         borderColor: ["#ef4444","#10b981"], borderWidth: 2, hoverOffset: 8 }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: "right",
-                    labels: { color: "#94a3b8", font: { family: "Inter", size: 12 }, padding: 14 }
-                }
-            },
-            cutout: "65%"
-        }
+        options: chartOpts({ cutout: "62%", plugins: {
+            legend: { position: "bottom", labels: { color: "#94a3b8" } },
+            tooltip: { backgroundColor: "#1e293b" }
+        }})
     });
 }
 
-function renderScatterPlot(records) {
-    const ctx = document.getElementById("scatterChart")?.getContext("2d");
-    if (!ctx) return;
-    if (chartInstances.scatter) chartInstances.scatter.destroy();
+// 2. Glucose distribution bar
+function renderGlucoseDistChart() {
+    const { normalCount, preDiabCount, diabRangeCount } = analyticsData.glucoseDistribution;
+    charts.glucoseDist = new Chart(document.getElementById("glucoseDistChart"), {
+        type: "bar",
+        data: {
+            labels: ["Normal\n(<100 mg/dL)", "Pre-Diabetic\n(100–125)", "Diabetic Range\n(≥126)"],
+            datasets: [{ label: "Patients", data: [normalCount, preDiabCount, diabRangeCount],
+                backgroundColor: [ACCENT.nonDiabetic, ACCENT.amber, ACCENT.diabetic],
+                borderRadius: 8, borderSkipped: false }]
+        },
+        options: chartOpts({ scales: {
+            x: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" } },
+            y: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" }, beginAtZero: true }
+        }, plugins: { legend: { display: false } } })
+    });
+}
 
-    const scatterData = records.map(r => ({ x: r.sleepHours, y: r.meanSugar }));
+// 3. BMI groups
+function renderBMIChart() {
+    const bmi = analyticsData.bmiGroups;
+    charts.bmi = new Chart(document.getElementById("bmiChart"), {
+        type: "bar",
+        data: {
+            labels: ["Underweight\n(<18.5)", "Normal\n(18.5–24.9)", "Overweight\n(25–29.9)", "Obese\n(≥30)"],
+            datasets: [{ label: "Patients", data: [bmi.underweight, bmi.normal, bmi.overweight, bmi.obese],
+                backgroundColor: [ACCENT.sky, ACCENT.nonDiabetic, ACCENT.amber, ACCENT.diabetic],
+                borderRadius: 8, borderSkipped: false }]
+        },
+        options: chartOpts({ scales: {
+            x: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" } },
+            y: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" }, beginAtZero: true }
+        }, plugins: { legend: { display: false } } })
+    });
+}
 
-    // Regression line points (from min sleep to max sleep)
-    const minSleep = Math.min(...records.map(r => r.sleepHours));
-    const maxSleep = Math.max(...records.map(r => r.sleepHours));
-    const slope = 0.0853;
-    const intercept = 124.54;
-    const trendline = [
-        { x: minSleep, y: intercept + slope * minSleep },
-        { x: maxSleep, y: intercept + slope * maxSleep }
-    ];
+// 4. Age groups
+function renderAgeChart() {
+    const ag = analyticsData.ageGroups;
+    charts.age = new Chart(document.getElementById("ageChart"), {
+        type: "bar",
+        data: {
+            labels: Object.keys(ag),
+            datasets: [{ label: "Patients", data: Object.values(ag),
+                backgroundColor: ACCENT.primary, borderRadius: 8, borderSkipped: false }]
+        },
+        options: chartOpts({ scales: {
+            x: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" } },
+            y: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" }, beginAtZero: true }
+        }, plugins: { legend: { display: false } } })
+    });
+}
 
-    chartInstances.scatter = new Chart(ctx, {
+// 5. Pregnancy cohort diabetic rate
+function renderPregChart() {
+    const pc = analyticsData.pregCohorts;
+    charts.preg = new Chart(document.getElementById("pregChart"), {
+        type: "bar",
+        data: {
+            labels: Object.keys(pc).map(k => `${k} pregnancies\n(n=${pc[k].count})`),
+            datasets: [{ label: "Diabetic Rate (%)", data: Object.values(pc).map(v => v.diabeticRate),
+                backgroundColor: [ACCENT.nonDiabetic, ACCENT.amber, ACCENT.primary, ACCENT.diabetic],
+                borderRadius: 8, borderSkipped: false }]
+        },
+        options: chartOpts({ scales: {
+            x: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" } },
+            y: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" }, beginAtZero: true, max: 80,
+                 title: { display: true, text: "Diabetic Rate (%)", color: "#94a3b8" } }
+        }, plugins: { legend: { display: false } } })
+    });
+}
+
+// 6. Scatter: Glucose vs BMI
+function renderScatterChart() {
+    const records = analyticsData.records || rawRecords;
+    const diabetic    = records.filter(r => r.outcome === 1)
+                               .map(r => ({ x: r.glucose, y: r.bmi }));
+    const nonDiabetic = records.filter(r => r.outcome === 0)
+                               .map(r => ({ x: r.glucose, y: r.bmi }));
+
+    charts.scatter = new Chart(document.getElementById("scatterChart"), {
         type: "scatter",
         data: {
             datasets: [
-                {
-                    label: "Patient Logged Days",
-                    data: scatterData,
-                    backgroundColor: "rgba(56, 189, 248, 0.45)",
-                    borderColor: "#38bdf8",
-                    pointRadius: 4,
-                    pointHoverRadius: 6
-                },
-                {
-                    label: "Fitted Regression Trend (OLS)",
-                    data: trendline,
-                    type: "line",
-                    borderColor: "#f43f5e",
-                    borderWidth: 2.5,
-                    borderDash: [6, 4],
-                    pointRadius: 0,
-                    fill: false
-                }
+                { label: "Diabetic", data: diabetic,
+                  backgroundColor: "rgba(239,68,68,0.45)", pointRadius: 4, pointHoverRadius: 6 },
+                { label: "Non-Diabetic", data: nonDiabetic,
+                  backgroundColor: "rgba(16,185,129,0.35)", pointRadius: 3.5, pointHoverRadius: 5.5 }
             ]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { labels: { color: "#94a3b8" } },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => `Sleep: ${ctx.parsed.x}h | Glucose: ${ctx.parsed.y} mg/dL`
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    title: { display: true, text: "Sleep Duration (Hours)", color: "#94a3b8" },
-                    ticks: { color: "#64748b" },
-                    grid: { color: "rgba(255, 255, 255, 0.05)" }
-                },
-                y: {
-                    title: { display: true, text: "Mean Blood Glucose (mg/dL)", color: "#94a3b8" },
-                    ticks: { color: "#64748b" },
-                    grid: { color: "rgba(255, 255, 255, 0.05)" },
-                    min: 90,
-                    max: 160
-                }
-            }
-        }
+        options: chartOpts({ scales: {
+            x: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" },
+                 title: { display: true, text: "Fasting Glucose (mg/dL)", color: "#94a3b8" } },
+            y: { grid: { color: ACCENT.gridLine }, ticks: { color: "#94a3b8" },
+                 title: { display: true, text: "BMI (kg/m²)", color: "#94a3b8" } }
+        }})
     });
 }
 
-function renderCohortChart(records) {
-    const ctx = document.getElementById("cohortBarChart")?.getContext("2d");
-    if (!ctx) return;
-    if (chartInstances.cohort) chartInstances.cohort.destroy();
+// ── Stats table ───────────────────────────────────────────────────────────────
+function buildStatsTable() {
+    const records = analyticsData.records || rawRecords;
+    if (!records.length) return;
 
-    const low = records.filter(r => r.sleepHours < 6);
-    const med = records.filter(r => r.sleepHours >= 6 && r.sleepHours < 8);
-    const high = records.filter(r => r.sleepHours >= 8);
+    const d  = records.filter(r => r.outcome === 1);
+    const nd = records.filter(r => r.outcome === 0);
 
-    const calcMean = (arr) => arr.length ? (arr.reduce((s, r) => s + r.meanSugar, 0) / arr.length).toFixed(1) : 0;
+    const fields = [
+        ["glucose",       "Fasting Glucose (mg/dL)"],
+        ["bmi",           "BMI (kg/m²)"],
+        ["age",           "Age (years)"],
+        ["insulin",       "Insulin (μU/mL)"],
+        ["bloodPressure", "Blood Pressure (mmHg)"],
+        ["pregnancies",   "Pregnancies"],
+        ["pedigree",      "Diabetes Pedigree Function"],
+        ["skinThickness", "Skin Thickness (mm)"]
+    ];
 
-    chartInstances.cohort = new Chart(ctx, {
-        type: "bar",
-        data: {
-            labels: [`Low <6h\n(n=${low.length})`, `Medium 6-8h\n(n=${med.length})`, `High ≥8h\n(n=${high.length})`],
-            datasets: [{
-                label: "Mean Glucose (mg/dL)",
-                data: [calcMean(low), calcMean(med), calcMean(high)],
-                backgroundColor: [
-                    "rgba(244, 63, 94, 0.7)",
-                    "rgba(16, 185, 129, 0.7)",
-                    "rgba(56, 189, 248, 0.7)"
-                ],
-                borderRadius: 8
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
-                y: {
-                    min: 100,
-                    max: 140,
-                    ticks: { color: "#64748b" },
-                    grid: { color: "rgba(255, 255, 255, 0.05)" },
-                    title: { display: true, text: "Mean mg/dL", color: "#94a3b8" }
-                }
-            }
-        }
+    const avg = (arr, f) => arr.length ? (arr.reduce((s, r) => s + r[f], 0) / arr.length) : 0;
+
+    const rows = fields.map(([f, label]) => {
+        const dm  = avg(d, f);
+        const ndm = avg(nd, f);
+        const all = avg(records, f);
+        const diff = dm - ndm;
+        const diffColor = diff > 0 ? "#ef4444" : "#10b981";
+        return `<tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:10px 16px; font-weight:500; color:var(--text-primary)">${label}</td>
+            <td style="padding:10px 16px; text-align:center; color:#ef4444">${dm.toFixed(2)}</td>
+            <td style="padding:10px 16px; text-align:center; color:#10b981">${ndm.toFixed(2)}</td>
+            <td style="padding:10px 16px; text-align:center; color:var(--text-secondary)">${all.toFixed(2)}</td>
+            <td style="padding:10px 16px; text-align:center; color:${diffColor}; font-weight:600">${diff > 0 ? "+" : ""}${diff.toFixed(2)}</td>
+        </tr>`;
     });
-}
 
-function applyTimeFilter(filter, btn) {
-    document.querySelectorAll(".chart-filter-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-
-    if (filter === "all") {
-        renderAllCharts();
-    } else {
-        renderAllCharts(parseInt(filter));
-    }
+    document.getElementById("statsTableBody").innerHTML = rows.join("");
 }

@@ -4,137 +4,183 @@ import json
 import pandas as pd
 import numpy as np
 import matplotlib
-# Use Agg backend if headless/non-interactive
 if '--show' not in sys.argv:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-from scipy.stats import pearsonr, f_oneway, shapiro
+from sklearn.metrics import (accuracy_score, precision_score,
+                             recall_score, f1_score, roc_auc_score,
+                             confusion_matrix)
+from sklearn.preprocessing import StandardScaler
+from scipy.stats import f_oneway, shapiro, pearsonr
 
-# Load dataset
+# ── Load dataset ────────────────────────────────────────────────────────────
 file_path = os.path.join(os.path.dirname(__file__), 'diabetes_data.csv')
 data = pd.read_csv(file_path)
 
-# Calculate Mean Sugar Level
-data["Mean Sugar Level"] = data[["Morning Sugar Level", "Afternoon Sugar Level", "Evening Sugar Level"]].mean(axis=1)
+# Rename columns for consistency
+rename_map = {
+    'PatientID': 'PatientID',
+    'Pregnancies': 'Pregnancies',
+    'Glucose': 'Glucose',
+    'BloodPressure': 'BloodPressure',
+    'SkinThickness': 'SkinThickness',
+    'Insulin': 'Insulin',
+    'BMI': 'BMI',
+    'DiabetesPedigree': 'DiabetesPedigree',
+    'Age': 'Age',
+    'Outcome': 'Outcome'
+}
+data = data.rename(columns={k: v for k, v in rename_map.items() if k in data.columns})
 
-# Define Independent (X) and Dependent (Y) variables
-X = data[["Sleep Hours"]]  # Independent variable (Feature)
-Y = data["Mean Sugar Level"]  # Dependent variable (Target)
+features = ['Pregnancies', 'Glucose', 'BloodPressure', 'SkinThickness',
+            'Insulin', 'BMI', 'DiabetesPedigree', 'Age']
 
-# Split into training & testing datasets
-X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+X = data[features]
+y = data['Outcome']
 
-# Train the Linear Regression Model
-model = LinearRegression()
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
+# ── Train/Test Split & Logistic Regression ───────────────────────────────────
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2,
+                                                     random_state=42, stratify=y)
+scaler = StandardScaler()
+X_train_s = scaler.fit_transform(X_train)
+X_test_s  = scaler.transform(X_test)
 
-# Model Performance Metrics
-r2 = r2_score(y_test, y_pred)
-mae = mean_absolute_error(y_test, y_pred)
-rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-corr, p_corr = pearsonr(data["Sleep Hours"], data["Mean Sugar Level"])
+model = LogisticRegression(max_iter=1000, random_state=42)
+model.fit(X_train_s, y_train)
+y_pred  = model.predict(X_test_s)
+y_prob  = model.predict_proba(X_test_s)[:, 1]
 
-# Multi-feature model for Evening Glucose
-X_multi = data[['Sleep Hours', 'Morning Sugar Level', 'Afternoon Sugar Level']]
-y_multi = data['Evening Sugar Level']
-X_tr, X_te, y_tr, y_te = train_test_split(X_multi, y_multi, test_size=0.2, random_state=42)
-multi_model = LinearRegression().fit(X_tr, y_tr)
-y_multi_pred = multi_model.predict(X_te)
-multi_mae = mean_absolute_error(y_te, y_multi_pred)
+accuracy  = round(accuracy_score(y_test, y_pred), 4)
+precision = round(precision_score(y_test, y_pred), 4)
+recall    = round(recall_score(y_test, y_pred), 4)
+f1        = round(f1_score(y_test, y_pred), 4)
+auc_roc   = round(roc_auc_score(y_test, y_prob), 4)
 
-# Sleep cohorts analysis
-low_sleep = data[data["Sleep Hours"] < 6]["Mean Sugar Level"]
-medium_sleep = data[(data["Sleep Hours"] >= 6) & (data["Sleep Hours"] < 8)]["Mean Sugar Level"]
-high_sleep = data[data["Sleep Hours"] >= 8]["Mean Sugar Level"]
-f_stat, p_value = f_oneway(low_sleep, medium_sleep, high_sleep)
+cm = confusion_matrix(y_test, y_pred).tolist()
 
-# Shapiro-Wilk Test for Normality
+# Feature importance (absolute coefficient values)
+coef_dict = {feat: round(float(coef), 4)
+             for feat, coef in zip(features, model.coef_[0])}
+abs_coef  = {feat: round(abs(coef), 4)
+             for feat, coef in zip(features, model.coef_[0])}
+intercept = round(float(model.intercept_[0]), 4)
+total_coef_sum = sum(abs_coef.values())
+feature_importance = {feat: round(v / total_coef_sum, 4)
+                      for feat, v in abs_coef.items()}
+
+# ── ANOVA: Glucose across Diabetic vs Non-Diabetic ──────────────────────────
+diabetic     = data[data['Outcome'] == 1]['Glucose']
+non_diabetic = data[data['Outcome'] == 0]['Glucose']
+f_stat, p_value = f_oneway(diabetic, non_diabetic)
+
+# ── Shapiro-Wilk per group ───────────────────────────────────────────────────
 shapiro_results = {}
-for group_name, group_data in [("Low Sleep (<6h)", low_sleep), ("Medium Sleep (6-8h)", medium_sleep), ("High Sleep (>=8h)", high_sleep)]:
-    stat, p = shapiro(group_data)
+for group_name, group_data in [("Diabetic", diabetic), ("Non-Diabetic", non_diabetic)]:
+    stat, p = shapiro(group_data.sample(min(len(group_data), 5000), random_state=42))
     shapiro_results[group_name] = {
-        "W": float(stat),
-        "p": float(p),
-        "mean": float(group_data.mean()),
-        "std": float(group_data.std()),
+        "W": round(float(stat), 4),
+        "p": round(float(p), 6),
+        "mean": round(float(group_data.mean()), 2),
+        "std": round(float(group_data.std()), 2),
         "count": int(len(group_data)),
-        "is_normal": bool(p > 0.05)
+        "is_normal": bool(p >= 0.05)
     }
 
-# Save Boxplot visualization
-plot_path = os.path.join(os.path.dirname(__file__), 'sleep_sugar_boxplot.png')
-plt.figure(figsize=(8, 5))
-data['Sleep Category'] = pd.cut(data["Sleep Hours"], bins=[0, 6, 8, 24], labels=["Low (<6h)", "Medium (6-8h)", "High (>=8h)"])
-sns.set_theme(style="whitegrid")
-palette = ["#f87171", "#60a5fa", "#34d399"]
-ax = sns.boxplot(x="Sleep Category", y="Mean Sugar Level", data=data, hue="Sleep Category", palette=palette, legend=False)
-plt.xlabel("Sleep Hours Category", fontsize=12, fontweight='bold')
-plt.ylabel("Mean Blood Sugar Level (mg/dL)", fontsize=12, fontweight='bold')
-plt.title("Distribution of Mean Blood Sugar Level by Sleep Duration Cohort", fontsize=13, fontweight='bold', pad=15)
-plt.tight_layout()
-plt.savefig(plot_path, dpi=150)
+# ── Pearson correlation matrix (key pairs) ──────────────────────────────────
+corr_glucose_outcome, p_go = pearsonr(data['Glucose'], data['Outcome'])
+corr_bmi_outcome, p_bo     = pearsonr(data['BMI'], data['Outcome'])
+corr_age_outcome, p_ao     = pearsonr(data['Age'], data['Outcome'])
 
-if '--show' in sys.argv:
-    plt.show()
+# ── Boxplot: Glucose by Outcome ──────────────────────────────────────────────
+plt.figure(figsize=(9, 6))
+sns.set_theme(style='darkgrid')
+data_plot = data.copy()
+data_plot['OutcomeLabel'] = data_plot['Outcome'].map({0: 'Non-Diabetic', 1: 'Diabetic'})
+palette = {'Non-Diabetic': '#10b981', 'Diabetic': '#ef4444'}
+ax = sns.boxplot(data=data_plot, x='OutcomeLabel', y='Glucose', hue='OutcomeLabel',
+                 palette=palette, order=['Non-Diabetic', 'Diabetic'],
+                 width=0.5, linewidth=1.5, legend=False)
+ax.set_title('Fasting Plasma Glucose Distribution\nPima Indians Diabetes Dataset (NIDDK)',
+             fontsize=13, fontweight='bold', pad=14)
+ax.set_xlabel('Diabetes Outcome', fontsize=11)
+ax.set_ylabel('Fasting Plasma Glucose (mg/dL)', fontsize=11)
+ax.axhline(126, color='#f59e0b', linestyle='--', linewidth=1.2,
+           label='Diabetic Threshold (126 mg/dL)')
+ax.axhline(100, color='#6366f1', linestyle='--', linewidth=1.2,
+           label='Pre-Diabetic Threshold (100 mg/dL)')
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.savefig(os.path.join(os.path.dirname(__file__), 'pima_boxplot.png'),
+            dpi=150, bbox_inches='tight')
 plt.close()
 
+# ── Assemble JSON output ─────────────────────────────────────────────────────
+output = {
+    "dataset_size": int(len(data)),
+    "dataset_source": "UCI Pima Indians Diabetes Dataset (NIDDK)",
+    "diabetic_count": int(y.sum()),
+    "non_diabetic_count": int((y == 0).sum()),
+    "logistic_regression": {
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1_score": f1,
+        "auc_roc": auc_roc,
+        "intercept": intercept,
+        "coefficients": coef_dict,
+        "confusion_matrix": cm,
+        "equation": (
+            f"log(p/1-p) = {intercept} "
+            f"+ {coef_dict['Glucose']}·Glucose "
+            f"+ {coef_dict['BMI']}·BMI "
+            f"+ {coef_dict['Age']}·Age "
+            f"+ {coef_dict['DiabetesPedigree']}·Pedigree"
+        )
+    },
+    "feature_importance": feature_importance,
+    "anova": {
+        "f_statistic": round(float(f_stat), 4),
+        "p_value": round(float(p_value), 8),
+        "is_significant": bool(p_value < 0.05),
+        "interpretation": (
+            "Glucose levels differ significantly between diabetic and non-diabetic groups (p < 0.0001)."
+            if p_value < 0.05
+            else "No significant glucose difference between groups."
+        )
+    },
+    "correlations": {
+        "glucose_vs_outcome": round(float(corr_glucose_outcome), 4),
+        "bmi_vs_outcome": round(float(corr_bmi_outcome), 4),
+        "age_vs_outcome": round(float(corr_age_outcome), 4)
+    },
+    "shapiro_wilk": shapiro_results,
+    "plot_file": "pima_boxplot.png"
+}
+
 if '--json' in sys.argv:
-    output_data = {
-        "dataset_size": len(data),
-        "linear_regression": {
-            "slope": float(model.coef_[0]),
-            "intercept": float(model.intercept_),
-            "equation": f"Mean Glucose = {model.intercept_:.2f} + {model.coef_[0]:.4f} * (Sleep Hours)",
-            "r2_score": float(r2),
-            "mae": float(mae),
-            "rmse": float(rmse),
-            "pearson_r": float(corr),
-            "pearson_p": float(p_corr)
-        },
-        "multivariate_evening_model": {
-            "coefficients": {
-                "sleep_hours": float(multi_model.coef_[0]),
-                "morning_sugar": float(multi_model.coef_[1]),
-                "afternoon_sugar": float(multi_model.coef_[2])
-            },
-            "intercept": float(multi_model.intercept_),
-            "mae": float(multi_mae)
-        },
-        "anova": {
-            "f_statistic": float(f_stat),
-            "p_value": float(p_value),
-            "is_significant": bool(p_value < 0.05),
-            "interpretation": "Sleep duration has a statistically significant effect on sugar levels." if p_value < 0.05 else "No statistically significant effect of sleep duration on mean sugar levels (p >= 0.05)."
-        },
-        "shapiro_wilk": shapiro_results,
-        "plot_file": "sleep_sugar_boxplot.png"
-    }
-    print(json.dumps(output_data, indent=2))
+    print(json.dumps(output))
 else:
-    print("==================================================")
-    print("        DIABETES DATA ANALYSIS & ML REPORT        ")
-    print("==================================================")
-    print(f"Total Observations: {len(data)}")
-    print(f"\n[1] Linear Regression Model (Sleep -> Mean Sugar):")
-    print(f"    Equation: Mean Glucose = {model.intercept_:.2f} + {model.coef_[0]:.4f} * (Sleep Hours)")
-    print(f"    R-squared: {r2:.4f}")
-    print(f"    MAE: {mae:.4f} mg/dL | RMSE: {rmse:.4f} mg/dL")
-    print(f"    Pearson Correlation: r={corr:.4f} (p={p_corr:.4f})")
-    print(f"\n[2] One-Way ANOVA Hypothesis Test:")
-    print(f"    F-Statistic: {f_stat:.4f}")
-    print(f"    P-Value: {p_value:.4f}")
-    if p_value < 0.05:
-        print("    Result: Sleep hours have a statistically significant effect on sugar levels.")
-    else:
-        print("    Result: No significant effect of sleep hours on sugar levels (p >= 0.05).")
-    print(f"\n[3] Shapiro-Wilk Test for Normality:")
-    for group, stats in shapiro_results.items():
-        norm_status = "Normal (p > 0.05)" if stats['is_normal'] else "Non-normal (p <= 0.05)"
-        print(f"    {group} (n={stats['count']}): W={stats['W']:.4f}, p={stats['p']:.4f} -> {norm_status}")
-    print(f"\n[4] Visualization saved to: {plot_path}")
-    print("==================================================")
+    print("=" * 60)
+    print(f"Dataset: {output['dataset_source']}")
+    print(f"Total patients: {output['dataset_size']}")
+    print(f"Diabetic: {output['diabetic_count']}  |  Non-Diabetic: {output['non_diabetic_count']}")
+    print("-" * 60)
+    print("Logistic Regression Performance:")
+    print(f"  Accuracy:  {accuracy:.4f}")
+    print(f"  Precision: {precision:.4f}")
+    print(f"  Recall:    {recall:.4f}")
+    print(f"  F1-Score:  {f1:.4f}")
+    print(f"  AUC-ROC:   {auc_roc:.4f}")
+    print("-" * 60)
+    print("ANOVA (Glucose ~ Outcome):")
+    print(f"  F = {f_stat:.4f}, p = {p_value:.6f}")
+    print(f"  Significant: {p_value < 0.05}")
+    print("-" * 60)
+    print("Top Feature Importance:")
+    for feat, imp in sorted(feature_importance.items(), key=lambda x: -x[1]):
+        print(f"  {feat}: {imp:.4f}")
+    print("=" * 60)
+    print("Boxplot saved: pima_boxplot.png")

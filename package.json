@@ -1,17 +1,20 @@
 {
-  "name": "lab-project",
+  "name": "glucopulse-ai",
   "version": "1.0.0",
-  "main": "record.js",
+  "description": "GlucoPulse AI — Pima Indians Diabetes Dataset explorer with analytics and ML predictions",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
+    "dev": "node server.js",
     "server:py": "python server.py",
-    "analyze": "python analysis.py"
+    "analyze": "python analysis.py",
+    "analyze:json": "python analysis.py --json",
+    "fetch:nhanes": "python fetch_nhanes_data.py",
+    "test": "echo \"No automated tests configured\" && exit 0"
   },
-  "keywords": [],
+  "keywords": ["diabetes", "pima", "machine-learning", "healthcare", "analytics"],
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2"

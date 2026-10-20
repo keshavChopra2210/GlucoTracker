@@ -1,4 +1,4 @@
-// Diabetes Tracker & Record Management
+// ── GlucoPulse AI — Patient Records (Pima Indians Dataset) ──────────────────
 let allRecords = [];
 let filteredRecords = [];
 let currentPage = 1;
@@ -6,365 +6,325 @@ let pageSize = 15;
 
 document.addEventListener("DOMContentLoaded", () => {
     loadRecords();
-    setupEventListeners();
+
+    document.getElementById("searchInput").addEventListener("input", () => {
+        currentPage = 1;
+        filterTable();
+    });
+
+    document.getElementById("addEntryForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await submitNewPatient();
+    });
+
+    document.getElementById("editEntryForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await submitEditPatient();
+    });
 });
 
-// Load records from backend API or fallback to CSV file directly
+// ── Load records from API ────────────────────────────────────────────────────
 async function loadRecords() {
     try {
-        const response = await fetch("/api/records");
-        if (response.ok) {
-            const data = await response.json();
+        const res = await fetch("/api/records");
+        if (res.ok) {
+            const data = await res.json();
             if (data.records && data.records.length > 0) {
                 allRecords = data.records;
-                initTable();
+                updateKPIs();
+                filterTable();
                 return;
             }
         }
     } catch (err) {
-        console.warn("Backend API not reachable, attempting direct CSV fetch...", err);
+        console.warn("API not reachable, trying direct CSV…", err);
     }
 
-    // Fallback: fetch CSV file directly
+    // Fallback: parse CSV directly
     try {
-        const response = await fetch("diabetes_data.csv");
-        if (response.ok) {
-            const text = await response.text();
+        const res = await fetch("diabetes_data.csv");
+        if (res.ok) {
+            const text = await res.text();
             parseRawCSV(text);
-            initTable();
-        } else {
-            console.error("Could not fetch diabetes_data.csv directly");
+            updateKPIs();
+            filterTable();
         }
     } catch (err) {
-        console.error("Failed to load records from CSV:", err);
+        console.error("Failed to load records:", err);
     }
 }
 
+// ── Parse CSV ────────────────────────────────────────────────────────────────
 function parseRawCSV(csvText) {
     const lines = csvText.trim().split(/\r?\n/);
     if (lines.length <= 1) return;
-    
+    const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+
     allRecords = [];
     for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        const cols = line.split(",").map(c => c.trim());
-        if (cols.length < 5) continue;
+        const cols = lines[i].split(",").map(c => c.trim());
+        if (cols.length < 9) continue;
 
-        const date = cols[0];
-        const sleepHours = parseFloat(cols[1]) || 0;
-        const morningSugar = parseFloat(cols[2]) || 0;
-        const afternoonSugar = parseFloat(cols[3]) || 0;
-        const eveningSugar = parseFloat(cols[4]) || 0;
-        const meanSugar = parseFloat(((morningSugar + afternoonSugar + eveningSugar) / 3).toFixed(2));
+        const glucose = parseFloat(cols[2]) || 0;
+        const bmi     = parseFloat(cols[6]) || 0;
+        const outcome = parseInt(cols[9]) || 0;
 
-        let status = "Normal";
-        let statusClass = "status-normal";
-        if (meanSugar < 70) {
-            status = "Low (Hypo)";
-            statusClass = "status-low";
-        } else if (meanSugar > 180) {
-            status = "High (Hyper)";
-            statusClass = "status-high";
-        } else if (meanSugar >= 140) {
-            status = "Elevated";
-            statusClass = "status-elevated";
-        }
+        let glucoseStatus, glucoseClass;
+        if (glucose < 100)        { glucoseStatus = "Normal";         glucoseClass = "status-normal"; }
+        else if (glucose < 126)   { glucoseStatus = "Pre-Diabetic";   glucoseClass = "status-elevated"; }
+        else                      { glucoseStatus = "Diabetic Range"; glucoseClass = "status-high"; }
+
+        let bmiClass;
+        if (bmi < 18.5) bmiClass = "Underweight";
+        else if (bmi < 25) bmiClass = "Normal";
+        else if (bmi < 30) bmiClass = "Overweight";
+        else bmiClass = "Obese";
 
         allRecords.push({
-            date,
-            sleepHours,
-            morningSugar,
-            afternoonSugar,
-            eveningSugar,
-            meanSugar,
-            status,
-            statusClass
+            patientId:     cols[0],
+            pregnancies:   parseFloat(cols[1]) || 0,
+            glucose,
+            bloodPressure: parseFloat(cols[3]) || 0,
+            skinThickness: parseFloat(cols[4]) || 0,
+            insulin:       parseFloat(cols[5]) || 0,
+            bmi,
+            pedigree:      parseFloat(cols[7]) || 0,
+            age:           parseInt(cols[8]) || 0,
+            outcome,
+            label:         cols[10] || (outcome === 1 ? "Diabetic" : "Non-Diabetic"),
+            glucoseStatus, glucoseClass, bmiClass
         });
     }
 }
 
-function initTable() {
-    filteredRecords = [...allRecords].reverse(); // Show latest entries first
-    updateKPIs();
+// ── KPI updates ──────────────────────────────────────────────────────────────
+function updateKPIs() {
+    const n = allRecords.length;
+    if (!n) return;
+
+    const diabetic = allRecords.filter(r => r.outcome === 1).length;
+    const avgGlucose = (allRecords.reduce((s, r) => s + r.glucose, 0) / n).toFixed(1);
+    const avgBMI     = (allRecords.reduce((s, r) => s + r.bmi, 0) / n).toFixed(2);
+    const rate       = ((diabetic / n) * 100).toFixed(1);
+
+    document.getElementById("kpiTotalEntries").textContent = n;
+    document.getElementById("kpiDiabeticCount").textContent = diabetic;
+    document.getElementById("kpiDiabeticRate").textContent  = `${rate}% Prevalence Rate`;
+    document.getElementById("kpiAvgGlucose").textContent    = avgGlucose;
+    document.getElementById("kpiAvgBMI").textContent        = avgBMI;
+
+    const gEl = document.getElementById("kpiGlucoseStatus");
+    const avg = parseFloat(avgGlucose);
+    if (avg < 100) { gEl.textContent = "Normal Range"; gEl.className = "kpi-badge badge-success"; }
+    else if (avg < 126) { gEl.textContent = "Pre-Diabetic Range"; gEl.className = "kpi-badge badge-warning"; }
+    else { gEl.textContent = "Diabetic Range"; gEl.className = "kpi-badge badge-danger"; }
+}
+
+// ── Filter + render ──────────────────────────────────────────────────────────
+function filterTable() {
+    const query   = (document.getElementById("searchInput").value || "").toLowerCase();
+    const outcome = document.getElementById("outcomeFilter")?.value || "all";
+
+    filteredRecords = allRecords.filter(r => {
+        const matchOutcome = outcome === "all" || r.outcome === parseInt(outcome);
+        const matchSearch  = !query
+            || r.patientId.toLowerCase().includes(query)
+            || String(r.glucose).includes(query)
+            || r.label.toLowerCase().includes(query)
+            || r.bmiClass.toLowerCase().includes(query);
+        return matchOutcome && matchSearch;
+    });
+
+    currentPage = 1;
     renderTable();
 }
 
-function updateKPIs() {
-    if (allRecords.length === 0) return;
-    
-    const countEl = document.getElementById("kpiTotalEntries");
-    const avgSugarEl = document.getElementById("kpiAvgSugar");
-    const avgSleepEl = document.getElementById("kpiAvgSleep");
-    const statusEl = document.getElementById("kpiHealthStatus");
-
-    const totalSleep = allRecords.reduce((acc, r) => acc + r.sleepHours, 0);
-    const totalSugar = allRecords.reduce((acc, r) => acc + r.meanSugar, 0);
-
-    const avgSugar = (totalSugar / allRecords.length).toFixed(1);
-    const avgSleep = (totalSleep / allRecords.length).toFixed(1);
-
-    if (countEl) countEl.innerText = allRecords.length;
-    if (avgSugarEl) avgSugarEl.innerText = avgSugar;
-    if (avgSleepEl) avgSleepEl.innerText = avgSleep;
-
-    if (statusEl) {
-        if (avgSugar < 140) {
-            statusEl.className = "kpi-badge badge-success";
-            statusEl.innerText = "Optimal Control (<140)";
-        } else if (avgSugar <= 180) {
-            statusEl.className = "kpi-badge badge-warning";
-            statusEl.innerText = "Elevated Control";
-        } else {
-            statusEl.className = "kpi-badge badge-danger";
-            statusEl.innerText = "High Risk";
-        }
-    }
-}
-
-function renderTable() {
-    const tbody = document.querySelector("#trackerTable tbody");
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    const total = filteredRecords.length;
-    const totalPages = Math.ceil(total / pageSize) || 1;
-    if (currentPage > totalPages) currentPage = totalPages;
-    if (currentPage < 1) currentPage = 1;
-
-    const startIdx = (currentPage - 1) * pageSize;
-    const pageRecords = filteredRecords.slice(startIdx, startIdx + pageSize);
-
-    if (pageRecords.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 30px; color: var(--text-dim);">No matching records found.</td></tr>`;
-        updatePaginationInfo(0, 0, 0);
-        return;
-    }
-
-    pageRecords.forEach((r, idx) => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-            <td><strong>${r.date}</strong></td>
-            <td>${r.sleepHours.toFixed(1)} hrs</td>
-            <td>${r.morningSugar} mg/dL</td>
-            <td>${r.afternoonSugar} mg/dL</td>
-            <td>${r.eveningSugar} mg/dL</td>
-            <td><strong>${r.meanSugar}</strong> mg/dL</td>
-            <td><span class="status-pill ${r.statusClass}">${r.status}</span></td>
-            <td>
-                <button class="btn btn-danger btn-sm" onclick="deleteEntry('${r.date}')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    Delete
-                </button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-
-    updatePaginationInfo(startIdx + 1, Math.min(startIdx + pageSize, total), total);
-}
-
-function updatePaginationInfo(start, end, total) {
-    const infoEl = document.getElementById("paginationInfo");
-    const prevBtn = document.getElementById("prevPageBtn");
-    const nextBtn = document.getElementById("nextPageBtn");
-
-    if (infoEl) infoEl.innerText = `Showing ${start} to ${end} of ${total} entries`;
-    if (prevBtn) prevBtn.disabled = currentPage <= 1;
-    if (nextBtn) nextBtn.disabled = currentPage >= Math.ceil(total / pageSize);
+function changePageSize(size) {
+    pageSize = parseInt(size);
+    currentPage = 1;
+    renderTable();
 }
 
 function prevPage() {
-    if (currentPage > 1) {
-        currentPage--;
-        renderTable();
-    }
+    if (currentPage > 1) { currentPage--; renderTable(); }
 }
 
 function nextPage() {
-    const totalPages = Math.ceil(filteredRecords.length / pageSize);
-    if (currentPage < totalPages) {
-        currentPage++;
-        renderTable();
-    }
+    const total = Math.ceil(filteredRecords.length / pageSize);
+    if (currentPage < total) { currentPage++; renderTable(); }
 }
 
-function handleSearch(query) {
-    const q = query.toLowerCase().trim();
-    if (!q) {
-        filteredRecords = [...allRecords].reverse();
-    } else {
-        filteredRecords = allRecords.filter(r => 
-            r.date.includes(q) || 
-            r.status.toLowerCase().includes(q) ||
-            r.meanSugar.toString().includes(q)
-        ).reverse();
-    }
-    currentPage = 1;
-    renderTable();
-}
+// ── Render table rows ─────────────────────────────────────────────────────────
+function renderTable() {
+    const tbody = document.querySelector("#trackerTable tbody");
+    const start = (currentPage - 1) * pageSize;
+    const end   = Math.min(start + pageSize, filteredRecords.length);
+    const page  = filteredRecords.slice(start, end);
 
-function changePageSize(newSize) {
-    pageSize = parseInt(newSize);
-    currentPage = 1;
-    renderTable();
-}
-
-// Delete entry
-async function deleteEntry(date) {
-    if (!confirm(`Are you sure you want to delete the record for ${date}?`)) return;
-
-    allRecords = allRecords.filter(r => r.date !== date);
-    handleSearch(document.getElementById("searchInput")?.value || "");
-    updateKPIs();
-
-    // Notify backend
-    try {
-        await fetch(`/api/records/${date}`, { method: "DELETE" });
-    } catch (err) {
-        console.warn("Could not sync delete with server, saved locally.");
-    }
-}
-
-// Modal open/close for adding entry
-function openAddModal() {
-    const modal = document.getElementById("addEntryModal");
-    if (modal) {
-        const today = new Date().toISOString().split("T")[0];
-        document.getElementById("entryDate").value = today;
-        document.getElementById("entrySleep").value = "7.5";
-        document.getElementById("entryMorning").value = "115";
-        document.getElementById("entryAfternoon").value = "125";
-        document.getElementById("entryEvening").value = "120";
-        modal.style.display = "flex";
-    }
-}
-
-function closeAddModal() {
-    const modal = document.getElementById("addEntryModal");
-    if (modal) modal.style.display = "none";
-}
-
-// Save new entry from modal
-async function submitNewEntry(e) {
-    if (e) e.preventDefault();
-
-    const date = document.getElementById("entryDate").value;
-    const sleepHours = parseFloat(document.getElementById("entrySleep").value) || 0;
-    const morningSugar = parseFloat(document.getElementById("entryMorning").value) || 0;
-    const afternoonSugar = parseFloat(document.getElementById("entryAfternoon").value) || 0;
-    const eveningSugar = parseFloat(document.getElementById("entryEvening").value) || 0;
-
-    if (!date) {
-        alert("Please select a date.");
+    if (!page.length) {
+        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-dim);">No matching patient records found.</td></tr>`;
+        document.getElementById("paginationInfo").textContent = "0 results";
+        document.getElementById("prevPageBtn").disabled = true;
+        document.getElementById("nextPageBtn").disabled = true;
         return;
     }
 
-    const meanSugar = parseFloat(((morningSugar + afternoonSugar + eveningSugar) / 3).toFixed(2));
-    let status = "Normal";
-    let statusClass = "status-normal";
-    if (meanSugar < 70) {
-        status = "Low (Hypo)";
-        statusClass = "status-low";
-    } else if (meanSugar > 180) {
-        status = "High (Hyper)";
-        statusClass = "status-high";
-    } else if (meanSugar >= 140) {
-        status = "Elevated";
-        statusClass = "status-elevated";
-    }
+    tbody.innerHTML = page.map(r => `
+        <tr>
+            <td><code style="font-size:12px;color:var(--accent-primary)">${r.patientId}</code></td>
+            <td>${r.pregnancies}</td>
+            <td><strong>${r.glucose}</strong></td>
+            <td>${r.bloodPressure}</td>
+            <td>${r.skinThickness}</td>
+            <td>${r.insulin}</td>
+            <td>${r.bmi.toFixed(1)} <small style="color:var(--text-dim)">(${r.bmiClass})</small></td>
+            <td>${r.pedigree.toFixed(3)}</td>
+            <td>${r.age}</td>
+            <td><span class="status-badge ${r.glucoseClass}">${r.glucoseStatus}</span></td>
+            <td><span class="status-badge ${r.outcome === 1 ? 'status-high' : 'status-normal'}">${r.label}</span></td>
+            <td style="display:flex;gap:6px;align-items:center;">
+                <button class="btn btn-secondary btn-sm" onclick="openEditModal(${JSON.stringify(r).replace(/"/g, '&quot;')})" title="Edit">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="deleteRecord('${r.patientId}')" title="Delete" style="color:#f87171;border-color:rgba(239,68,68,0.3);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6M14 11v6"></path></svg>
+                </button>
+            </td>
+        </tr>
+    `).join("");
 
-    const newRec = {
-        date,
-        sleepHours,
-        morningSugar,
-        afternoonSugar,
-        eveningSugar,
-        meanSugar,
-        status,
-        statusClass,
-        actions: "Delete"
+    const total = Math.ceil(filteredRecords.length / pageSize);
+    document.getElementById("paginationInfo").textContent =
+        `Showing ${start + 1}–${end} of ${filteredRecords.length} patients`;
+    document.getElementById("prevPageBtn").disabled = currentPage <= 1;
+    document.getElementById("nextPageBtn").disabled = currentPage >= total;
+}
+
+// ── Add patient ───────────────────────────────────────────────────────────────
+function openAddModal() {
+    document.getElementById("addEntryModal").style.display = "flex";
+}
+
+function closeAddModal() {
+    document.getElementById("addEntryModal").style.display = "none";
+    document.getElementById("addEntryForm").reset();
+}
+
+async function submitNewPatient() {
+    const payload = {
+        pregnancies:   document.getElementById("entryPregnancies").value,
+        glucose:       document.getElementById("entryGlucose").value,
+        bloodPressure: document.getElementById("entryBP").value,
+        skinThickness: document.getElementById("entrySkin").value,
+        insulin:       document.getElementById("entryInsulin").value,
+        bmi:           document.getElementById("entryBMI").value,
+        pedigree:      document.getElementById("entryPedigree").value,
+        age:           document.getElementById("entryAge").value,
+        outcome:       document.getElementById("entryOutcome").value
     };
 
-    // Update in-memory
-    const existingIndex = allRecords.findIndex(r => r.date === date);
-    if (existingIndex >= 0) {
-        allRecords[existingIndex] = newRec;
-    } else {
-        allRecords.push(newRec);
-    }
-
-    allRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
-    handleSearch(document.getElementById("searchInput")?.value || "");
-    updateKPIs();
-    closeAddModal();
-
-    // Sync to backend
     try {
         const res = await fetch("/api/records", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(newRec)
+            body: JSON.stringify(payload)
         });
         const data = await res.json();
         if (data.success) {
-            showToast("Record successfully saved to server!");
+            closeAddModal();
+            await loadRecords();
+            showToast("Patient record added successfully!", "success");
+        } else {
+            showToast(data.error || "Failed to save.", "error");
         }
     } catch (err) {
-        console.warn("Backend not available, changes preserved in local session.");
-        showToast("Record saved locally.");
+        showToast("Server error. Please try again.", "error");
     }
 }
 
-// Save CSV to server (Compatibility endpoint)
-function saveCSVToServer() {
-    let csvData = "Date,Sleep Hours,Morning Sugar Level,Afternoon Sugar Level,Evening Sugar Level,Actions\n";
-    allRecords.forEach(r => {
-        csvData += `${r.date},${r.sleepHours},${r.morningSugar},${r.afternoonSugar},${r.eveningSugar},Delete\n`;
-    });
-
-    fetch("http://localhost:3000/save-csv", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csvData })
-    })
-    .then(response => response.text())
-    .then(message => showToast(message || "CSV updated successfully!"))
-    .catch(error => {
-        console.error("Error:", error);
-        showToast("Saved locally (Server error: " + error.message + ")");
-    });
+// ── Edit patient ──────────────────────────────────────────────────────────────
+function openEditModal(record) {
+    // record may come as a JSON string from the onclick attribute or as an object
+    const r = typeof record === "string" ? JSON.parse(record) : record;
+    document.getElementById("editPatientId").value    = r.patientId;
+    document.getElementById("editPregnancies").value  = r.pregnancies;
+    document.getElementById("editGlucose").value      = r.glucose;
+    document.getElementById("editBP").value           = r.bloodPressure;
+    document.getElementById("editSkin").value         = r.skinThickness;
+    document.getElementById("editInsulin").value      = r.insulin;
+    document.getElementById("editBMI").value          = r.bmi;
+    document.getElementById("editPedigree").value     = r.pedigree;
+    document.getElementById("editAge").value          = r.age;
+    document.getElementById("editOutcome").value      = r.outcome;
+    document.getElementById("editEntryModal").style.display = "flex";
 }
 
-// Download CSV file
+function closeEditModal() {
+    document.getElementById("editEntryModal").style.display = "none";
+    document.getElementById("editEntryForm").reset();
+}
+
+async function submitEditPatient() {
+    const patientId = document.getElementById("editPatientId").value;
+    const payload = {
+        pregnancies:   document.getElementById("editPregnancies").value,
+        glucose:       document.getElementById("editGlucose").value,
+        bloodPressure: document.getElementById("editBP").value,
+        skinThickness: document.getElementById("editSkin").value,
+        insulin:       document.getElementById("editInsulin").value,
+        bmi:           document.getElementById("editBMI").value,
+        pedigree:      document.getElementById("editPedigree").value,
+        age:           document.getElementById("editAge").value,
+        outcome:       document.getElementById("editOutcome").value
+    };
+
+    try {
+        const res = await fetch(`/api/records/${encodeURIComponent(patientId)}`, {
+            method:  "PUT",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+            closeEditModal();
+            await loadRecords();
+            showToast("Patient record updated!", "success");
+        } else {
+            showToast(data.error || "Update failed.", "error");
+        }
+    } catch (err) {
+        showToast("Server error. Please try again.", "error");
+    }
+}
+
+// ── Delete patient ────────────────────────────────────────────────────────────
+async function deleteRecord(patientId) {
+    if (!confirm(`Delete patient ${patientId}?`)) return;
+    try {
+        const res = await fetch(`/api/records/${encodeURIComponent(patientId)}`, { method: "DELETE" });
+        const data = await res.json();
+        if (data.success) {
+            await loadRecords();
+            showToast("Patient deleted.", "success");
+        } else {
+            showToast(data.error || "Delete failed.", "error");
+        }
+    } catch (err) {
+        showToast("Server error.", "error");
+    }
+}
+
+// ── Download CSV ──────────────────────────────────────────────────────────────
 function downloadCSV() {
     window.location.href = "/download-csv";
 }
 
-function showToast(msg) {
-    let toast = document.getElementById("appToast");
-    if (!toast) {
-        toast = document.createElement("div");
-        toast.id = "appToast";
-        toast.style.cssText = "position: fixed; bottom: 24px; right: 24px; background: #06b6d4; color: white; padding: 12px 24px; border-radius: 9999px; font-weight: 600; box-shadow: 0 10px 25px rgba(6,182,212,0.4); z-index: 9999; transition: all 0.3s;";
-        document.body.appendChild(toast);
-    }
-    toast.innerText = msg;
-    toast.style.opacity = "1";
-    toast.style.transform = "translateY(0)";
-    setTimeout(() => {
-        toast.style.opacity = "0";
-        toast.style.transform = "translateY(10px)";
-    }, 3000);
-}
-
-function setupEventListeners() {
-    const searchInput = document.getElementById("searchInput");
-    if (searchInput) {
-        searchInput.addEventListener("input", (e) => handleSearch(e.target.value));
-    }
-    const addForm = document.getElementById("addEntryForm");
-    if (addForm) {
-        addForm.addEventListener("submit", submitNewEntry);
-    }
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, type = "success") {
+    const t = document.createElement("div");
+    t.className = `toast toast-${type}`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.classList.add("toast-show"), 10);
+    setTimeout(() => { t.classList.remove("toast-show"); setTimeout(() => t.remove(), 400); }, 3000);
 }

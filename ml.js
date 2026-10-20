@@ -1,382 +1,242 @@
-// Machine Learning & AI Prediction Engine
-let simulationChart = null;
+// ── GlucoPulse AI — Machine Learning (Pima Indians Dataset) ─────────────────
+let featureChart = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-    initSimulationChart();
-    runPrediction();
     loadMLDiagnostics();
+    runPrediction(); // show default result
 });
 
-function updateSleepLabel(val) {
-    const label = document.getElementById("sleepValLabel");
-    if (label) label.innerText = parseFloat(val).toFixed(1) + " hrs";
-    runPrediction();
-}
-
-async function runPrediction() {
-    const sleep = parseFloat(document.getElementById("inputSleep")?.value) || 7.5;
-    const morning = parseFloat(document.getElementById("inputMorning")?.value) || 115;
-    const afternoon = parseFloat(document.getElementById("inputAfternoon")?.value) || 130;
-    const activity = document.getElementById("inputActivity")?.value || "moderate";
-
-    let result = null;
-
-    // Try calling backend prediction API
+// ── Load ML diagnostics from API ──────────────────────────────────────────────
+async function loadMLDiagnostics() {
     try {
-        const res = await fetch("/api/predict", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sleepHours: sleep, morningSugar: morning, afternoonSugar: afternoon, activity })
-        });
-        if (res.ok) {
-            const data = await res.json();
-            if (data.predictions) {
-                result = data.predictions;
-            }
+        const res  = await fetch("/api/ml-info");
+        const json = await res.json();
+        if (json.success && json.data) {
+            populateDiagnostics(json.data);
         }
-    } catch (err) {
-        console.warn("Backend predict API unreachable, using client-side regression model...", err);
-    }
-
-    // Client-side fallback if backend API is not available
-    if (!result) {
-        // Multi-feature OLS Model: Evening = 119.67 - 0.138 * Sleep + 0.019 * Morning + 0.042 * Afternoon
-        let activityFactor = 0;
-        if (activity === "sedentary") activityFactor = 4.5;
-        if (activity === "active") activityFactor = -5.0;
-
-        const predEve = parseFloat((119.6689 - (0.1383 * sleep) + (0.0192 * morning) + (0.0419 * afternoon) + activityFactor).toFixed(1));
-        const predMean = parseFloat(((morning + afternoon + predEve) / 3).toFixed(1));
-
-        let riskCategory = "Optimal Glycemic Control";
-        let riskColor = "#10b981";
-        if (predMean < 70) {
-            riskCategory = "Hypoglycemic Risk (Low)";
-            riskColor = "#8b5cf6";
-        } else if (predMean > 180) {
-            riskCategory = "Hyperglycemic Alert (High)";
-            riskColor = "#ef4444";
-        } else if (predMean >= 140) {
-            riskCategory = "Elevated Glucose Warning";
-            riskColor = "#f59e0b";
-        }
-
-        const recs = [];
-        if (sleep < 6) {
-            recs.push("Sleep Debt Detected: Sleeping under 6 hours correlates with elevated cortisol and insulin resistance. Aim for 7 to 8.5 hours.");
-        } else if (sleep > 9) {
-            recs.push("Prolonged Sleep: Oversleeping can sometimes correlate with sluggish daytime metabolism. Ensure regular physical movement.");
-        } else {
-            recs.push("Sleep Range Optimal: " + sleep.toFixed(1) + " hours provides healthy restorative sleep for glucose homeostasis.");
-        }
-
-        if (predEve > 140) {
-            recs.push("Post-Dinner Spike Prevention: Consider an evening 15-minute walk and limit late-night carbohydrates.");
-        } else {
-            recs.push("Evening Stability: Evening glucose is projected to remain comfortably within the target ADA range.");
-        }
-
-        if (morning > 130) {
-            recs.push("Dawn Phenomenon Watch: Higher morning fasting glucose might reflect liver glycogen release; stay well hydrated.");
-        }
-
-        result = {
-            predictedEvening: predEve,
-            predictedMean: predMean,
-            confidenceInterval: {
-                low: parseFloat((predEve - 14.2).toFixed(1)),
-                high: parseFloat((predEve + 14.2).toFixed(1))
-            },
-            riskCategory,
-            riskColor,
-            recommendations: recs
-        };
-    }
-
-    // Update UI elements
-    updateUIWithPrediction(result, sleep, morning, afternoon);
-    updateSimulationCurve(morning, afternoon, sleep);
-}
-
-function updateUIWithPrediction(pred, sleep, morning, afternoon) {
-    const eveningValEl = document.getElementById("predEveningVal");
-    const meanValEl = document.getElementById("predMeanVal");
-    const ciEl = document.getElementById("predCI");
-    const riskBadge = document.getElementById("predRiskBadge");
-    const recsList = document.getElementById("predRecommendations");
-    const gaugeNeedle = document.getElementById("gaugeNeedle");
-
-    if (eveningValEl) eveningValEl.innerHTML = `${pred.predictedEvening} <span style="font-size: 14px; font-weight: 400; color: var(--text-dim);">mg/dL</span>`;
-    if (meanValEl) meanValEl.innerHTML = `${pred.predictedMean} <span style="font-size: 14px; font-weight: 400; color: var(--text-dim);">mg/dL</span>`;
-    if (ciEl) ciEl.innerText = `${pred.confidenceInterval.low} – ${pred.confidenceInterval.high} mg/dL`;
-
-    if (riskBadge) {
-        riskBadge.innerText = pred.riskCategory;
-        if (pred.predictedMean < 70) {
-            riskBadge.className = "kpi-badge badge-primary";
-        } else if (pred.predictedMean <= 140) {
-            riskBadge.className = "kpi-badge badge-success";
-        } else if (pred.predictedMean <= 180) {
-            riskBadge.className = "kpi-badge badge-warning";
-        } else {
-            riskBadge.className = "kpi-badge badge-danger";
-        }
-    }
-
-    if (recsList && pred.recommendations) {
-        recsList.innerHTML = pred.recommendations.map(r => `<li>${r}</li>`).join("");
-    }
-
-    // Gauge Needle Rotation:
-    // Scale: 50 mg/dL -> -90 deg, 125 mg/dL -> 0 deg, 200 mg/dL -> +90 deg
-    const clampedSugar = Math.max(50, Math.min(200, pred.predictedMean));
-    const angle = ((clampedSugar - 125) / 75) * 80;
-    if (gaugeNeedle) {
-        gaugeNeedle.style.transform = `rotate(${angle}deg)`;
-        gaugeNeedle.style.transformOrigin = "110px 110px";
+    } catch (e) {
+        console.warn("ML-info API unavailable:", e);
     }
 }
 
-function initSimulationChart() {
-    const ctx = document.getElementById("simulationChart")?.getContext("2d");
-    if (!ctx) return;
+function populateDiagnostics(d) {
+    const lr = d.logistic_regression || d.linear_regression || {};
 
-    simulationChart = new Chart(ctx, {
-        type: "line",
+    // Accuracy & metrics
+    if (lr.accuracy !== undefined) {
+        setEl("metricAccuracy", (lr.accuracy * 100).toFixed(1));
+        setEl("metricAUC",      (lr.auc_roc || 0).toFixed(4));
+        setEl("metricF1",       (lr.f1_score || 0).toFixed(4));
+        setEl("metricRecall",   ((lr.recall || 0) * 100).toFixed(1));
+        setEl("metricPrecision", ((lr.precision || 0) * 100).toFixed(1) + "%");
+    }
+
+    // Dataset size
+    if (d.dataset_size) {
+        setEl("metricDataset", d.dataset_size);
+        setEl("metricDatasetBadge", d.dataset_source || "NIDDK Real Data");
+    }
+
+    // Equation
+    if (lr.equation) setEl("regressionEquation", lr.equation);
+
+    // Confusion matrix
+    if (lr.confusion_matrix && lr.confusion_matrix.length === 2) {
+        const [[tn, fp], [fn, tp]] = lr.confusion_matrix;
+        setEl("cmTN", tn); setEl("cmFP", fp);
+        setEl("cmFN", fn); setEl("cmTP", tp);
+    }
+
+    // Feature importance chart
+    if (d.feature_importance) renderFeatureChart(d.feature_importance);
+
+    // ANOVA
+    if (d.anova) {
+        const a = d.anova;
+        const badge = document.getElementById("anovaBadge");
+        if (badge) {
+            badge.textContent = `F = ${a.f_statistic}, p ${a.p_value < 0.0001 ? "< 0.0001" : "= " + a.p_value}`;
+            badge.className   = `kpi-badge ${a.is_significant ? "badge-danger" : "badge-primary"}`;
+        }
+        // Build rich interpretation with <strong> tags
+        const interp = d.shapiro_wilk
+            ? `Glucose levels differ significantly between diabetic (<strong>μ = ${d.shapiro_wilk.Diabetic?.mean || "141.3"} mg/dL</strong>) and non-diabetic (<strong>μ = ${d.shapiro_wilk["Non-Diabetic"]?.mean || "110.0"} mg/dL</strong>) groups &mdash; an ANOVA F-statistic of <strong>${a.f_statistic}</strong> with <strong>p ${a.p_value < 0.0001 ? "&lt; 0.0001" : "= " + a.p_value}</strong> strongly rejects the null hypothesis (H₀: no difference).`
+            : a.interpretation;
+        setHTML("anovaInterpretation", interp);
+
+        // Update stat boxes with real values from shapiro_wilk
+        if (d.shapiro_wilk) {
+            const diabMeanEl = document.querySelector("[style*='color:#ef4444']");
+            const ndMeanEl   = document.querySelector("[style*='color:#10b981']");
+            if (diabMeanEl)  diabMeanEl.textContent  = `${d.shapiro_wilk.Diabetic?.mean || 141.3} mg/dL`;
+            if (ndMeanEl)    ndMeanEl.textContent     = `${d.shapiro_wilk["Non-Diabetic"]?.mean || 110.0} mg/dL`;
+        }
+    }
+
+    // Shapiro-Wilk
+    if (d.shapiro_wilk) renderShapiro(d.shapiro_wilk);
+}
+
+function setEl(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+function setHTML(id, html) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+}
+
+// ── Feature Importance Chart ──────────────────────────────────────────────────
+function renderFeatureChart(importance) {
+    const sorted = Object.entries(importance).sort((a, b) => b[1] - a[1]);
+    const labels = sorted.map(([k]) => k);
+    const values = sorted.map(([, v]) => (v * 100).toFixed(2));
+    const colors = [
+        "rgba(239,68,68,0.85)", "rgba(245,158,11,0.85)", "rgba(99,102,241,0.85)",
+        "rgba(16,185,129,0.85)", "rgba(56,189,248,0.85)", "rgba(168,85,247,0.85)",
+        "rgba(236,72,153,0.85)", "rgba(20,184,166,0.85)"
+    ];
+
+    if (featureChart) featureChart.destroy();
+    featureChart = new Chart(document.getElementById("featureImportanceChart"), {
+        type: "bar",
         data: {
-            labels: [4.0, 5.0, 6.0, 7.0, 7.5, 8.0, 9.0, 10.0],
-            datasets: [
-                {
-                    label: "Projected Evening Glucose (mg/dL)",
-                    data: [124.5, 124.2, 123.9, 123.6, 123.4, 123.3, 123.0, 122.7],
-                    borderColor: "#06b6d4",
-                    backgroundColor: "rgba(6, 182, 212, 0.1)",
-                    borderWidth: 2.5,
-                    tension: 0.3,
-                    fill: true
-                },
-                {
-                    label: "Current Sleep Selection",
-                    data: [],
-                    borderColor: "#f43f5e",
-                    backgroundColor: "#f43f5e",
-                    pointRadius: 7,
-                    pointHoverRadius: 9,
-                    showLine: false
-                }
-            ]
+            labels,
+            datasets: [{
+                label: "Importance (%)",
+                data: values,
+                backgroundColor: colors.slice(0, labels.length),
+                borderRadius: 8,
+                borderSkipped: false
+            }]
         },
         options: {
+            indexAxis: "y",
             responsive: true,
-            maintainAspectRatio: false,
+            maintainAspectRatio: true,
             plugins: {
-                legend: { labels: { color: "#94a3b8" } },
-                tooltip: {
-                    callbacks: {
-                        label: (c) => `${c.dataset.label}: ${c.parsed.y} mg/dL (at ${c.parsed.x} hrs sleep)`
-                    }
-                }
+                legend: { display: false },
+                tooltip: { backgroundColor: "#1e293b", titleColor: "#f1f5f9", bodyColor: "#94a3b8" }
             },
             scales: {
-                x: {
-                    title: { display: true, text: "Simulated Sleep Duration (Hours)", color: "#94a3b8" },
-                    ticks: { color: "#64748b" },
-                    grid: { color: "rgba(255, 255, 255, 0.05)" }
-                },
-                y: {
-                    title: { display: true, text: "Predicted Evening Glucose (mg/dL)", color: "#94a3b8" },
-                    ticks: { color: "#64748b" },
-                    grid: { color: "rgba(255, 255, 255, 0.05)" },
-                    min: 110,
-                    max: 140
-                }
+                x: { grid: { color: "rgba(255,255,255,0.06)" }, ticks: { color: "#94a3b8" }, beginAtZero: true,
+                     title: { display: true, text: "Importance (%)", color: "#94a3b8" } },
+                y: { grid: { color: "rgba(255,255,255,0.06)" }, ticks: { color: "#94a3b8" } }
             }
         }
     });
 }
 
-function updateSimulationCurve(morning, afternoon, selectedSleep) {
-    if (!simulationChart) return;
-
-    const sleepValues = [4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
-    const curvePoints = sleepValues.map(s => {
-        return parseFloat((119.6689 - (0.1383 * s) + (0.0192 * morning) + (0.0419 * afternoon)).toFixed(1));
-    });
-
-    const currentPredicted = parseFloat((119.6689 - (0.1383 * selectedSleep) + (0.0192 * morning) + (0.0419 * afternoon)).toFixed(1));
-
-    simulationChart.data.labels = sleepValues.map(s => `${s}h`);
-    simulationChart.data.datasets[0].data = curvePoints;
-    
-    // Find closest index for current selection point
-    const currentMarker = sleepValues.map(s => Math.abs(s - selectedSleep) < 0.25 ? currentPredicted : null);
-    simulationChart.data.datasets[1].data = currentMarker;
-
-    simulationChart.update("none");
+// ── Shapiro-Wilk table ────────────────────────────────────────────────────────
+function renderShapiro(sw) {
+    const container = document.getElementById("shapiroWilkRows");
+    if (!container) return;
+    container.innerHTML = Object.entries(sw).map(([group, s]) => `
+        <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px">${group}</td>
+            <td style="padding:10px; text-align:center">${s.W}</td>
+            <td style="padding:10px; text-align:center">${s.p}</td>
+            <td style="padding:10px; text-align:center">${s.count}</td>
+            <td style="padding:10px; text-align:center">
+                <span class="status-badge ${s.is_normal ? "status-normal" : "status-high"}">${s.is_normal ? "Yes" : "No"}</span>
+            </td>
+        </tr>
+    `).join("");
 }
 
-function resetForm() {
-    document.getElementById("inputSleep").value = 7.5;
-    document.getElementById("inputMorning").value = 115;
-    document.getElementById("inputAfternoon").value = 130;
-    document.getElementById("inputActivity").value = "moderate";
-    updateSleepLabel(7.5);
-    runPrediction();
-}
-
+// ── Python runner ─────────────────────────────────────────────────────────────
 async function executePythonAnalysis() {
-    const btn = document.getElementById("btnRunPython");
+    const btn      = document.getElementById("btnRunPython");
     const terminal = document.getElementById("pythonTerminalOutput");
-    const boxplot = document.getElementById("pythonBoxplotImg");
+    const boxWrap  = document.getElementById("pythonBoxplotWrap");
+    const boxImg   = document.getElementById("pythonBoxplotImg");
 
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = `<span style="display: inline-block; animation: spin 1s infinite linear;">⚙</span> Running analysis.py...`;
-    }
-    if (terminal) {
-        terminal.innerText = "Spawning python analysis.py subprocess...\nProcessing dataset and executing hypothesis tests...\n";
-    }
+    btn.disabled    = true;
+    btn.textContent = "⏳ Running analysis.py…";
+    terminal.textContent = "$ python analysis.py\n\nRunning Logistic Regression on Pima dataset…\n";
 
     try {
-        const res = await fetch("/api/run-python", { method: "POST" });
+        const res  = await fetch("/api/run-python", { method: "POST" });
         const data = await res.json();
 
-        if (terminal) {
-            terminal.innerText = data.stdout || data.stderr || "Executed successfully with no output.";
-        }
-        if (boxplot) {
-            boxplot.src = `sleep_sugar_boxplot.png?t=${Date.now()}`;
-            boxplot.style.display = "block";
-            const placeholder = document.getElementById("plotPlaceholder");
-            if (placeholder) placeholder.style.display = "none";
+        terminal.textContent = `$ python analysis.py\n\n${data.stdout || ""}${data.stderr ? "\nSTDERR:\n" + data.stderr : ""}`;
+
+        if (data.hasPlot) {
+            boxWrap.style.display = "block";
+            boxImg.src = `pima_boxplot.png?t=${Date.now()}`;
         }
 
-        // Reload diagnostics after python run (refreshes metrics from newly computed data)
-        await loadMLDiagnostics();
-
-    } catch (err) {
-        if (terminal) {
-            terminal.innerText = `Error executing Python script:\n${err.message}\n\nMake sure the local server is running (node server.js or python server.py).`;
+        if (data.success) {
+            await loadMLDiagnostics();
         }
+    } catch (e) {
+        terminal.textContent = "Error: Could not reach the server. Is node server.js running?";
     } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Run Python Script (analysis.py)`;
-        }
+        btn.disabled    = false;
+        btn.textContent = "▶ Run analysis.py & Retrain Model";
     }
 }
 
-// Dynamically load ML model info from the backend API and render into the diagnostics section
-async function loadMLDiagnostics() {
-    let mlData = null;
+// ── Diabetes Risk Prediction ──────────────────────────────────────────────────
+async function runPrediction() {
+    const payload = {
+        glucose:       document.getElementById("predGlucose")?.value     || 120,
+        bmi:           document.getElementById("predBMI")?.value          || 28.5,
+        age:           document.getElementById("predAge")?.value          || 33,
+        pedigree:      document.getElementById("predPedigree")?.value     || 0.471,
+        insulin:       document.getElementById("predInsulin")?.value      || 80,
+        bloodPressure: document.getElementById("predBP")?.value           || 72,
+        pregnancies:   document.getElementById("predPregnancies")?.value  || 1,
+        skinThickness: document.getElementById("predSkin")?.value         || 23
+    };
 
     try {
-        const res = await fetch("/api/ml-info");
-        if (res.ok) {
-            const json = await res.json();
-            if (json.success && json.data) {
-                mlData = json.data;
-            }
-        }
-    } catch (err) {
-        console.warn("Could not load ML diagnostics from API:", err);
+        const res  = await fetch("/api/predict", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) displayPrediction(data.predictions);
+    } catch (e) {
+        // Fallback: compute logistic regression locally
+        const logit = -8.2399
+            + (0.0318  * parseFloat(payload.glucose))
+            + (0.0126  * parseFloat(payload.bmi))
+            + (0.0133  * parseFloat(payload.age))
+            + (0.3410  * parseFloat(payload.pedigree))
+            + (0.0012  * parseFloat(payload.insulin))
+            + (-0.0115 * parseFloat(payload.bloodPressure))
+            + (0.0640  * parseFloat(payload.pregnancies))
+            + (0.0009  * parseFloat(payload.skinThickness));
+        const prob        = 1 / (1 + Math.exp(-logit));
+        const riskPercent = Math.round(prob * 100);
+        let riskCategory, riskColor;
+        if (riskPercent < 25)      { riskCategory = "Low Risk";       riskColor = "#10b981"; }
+        else if (riskPercent < 50) { riskCategory = "Moderate Risk";  riskColor = "#f59e0b"; }
+        else if (riskPercent < 70) { riskCategory = "High Risk";      riskColor = "#f97316"; }
+        else                       { riskCategory = "Very High Risk"; riskColor = "#ef4444"; }
+        displayPrediction({ riskPercent, riskCategory, riskColor, recommendations: [] });
     }
-
-    // Fallback to built-in default values if API is unavailable
-    if (!mlData) {
-        mlData = {
-            dataset_size: 500,
-            linear_regression: {
-                slope: 0.0853,
-                intercept: 124.54,
-                r2_score: -0.0054,
-                mae: 10.68,
-                rmse: 13.07,
-                pearson_r: -0.0017,
-                pearson_p: 0.9704
-            },
-            anova: {
-                f_statistic: 0.5115,
-                p_value: 0.5999,
-                is_significant: false,
-                interpretation: "No statistically significant effect of sleep duration on mean sugar levels (p >= 0.05)."
-            },
-            shapiro_wilk: {
-                "Low Sleep (<6h)": { W: 0.9799, p: 0.0865, mean: 125.62, std: 11.28, count: 113, is_normal: true },
-                "Medium Sleep (6-8h)": { W: 0.9956, p: 0.6882, mean: 124.44, std: 12.10, count: 256, is_normal: true },
-                "High Sleep (>=8h)": { W: 0.9862, p: 0.2110, mean: 125.42, std: 12.42, count: 131, is_normal: true }
-            }
-        };
-    }
-
-    renderMLDiagnostics(mlData);
 }
 
-function renderMLDiagnostics(data) {
-    const lr = data.linear_regression;
-    const anova = data.anova;
-    const shapiro = data.shapiro_wilk;
+function displayPrediction(p) {
+    const result = document.getElementById("predResult");
+    result.style.display = "block";
 
-    // Update Regression Equation
-    const eqEl = document.getElementById("regressionEquation");
-    if (eqEl && lr) {
-        const slope = lr.slope !== undefined ? lr.slope.toFixed(4) : "0.0853";
-        const intercept = lr.intercept !== undefined ? lr.intercept.toFixed(2) : "124.54";
-        eqEl.textContent = `Mean Glucose = ${intercept} + ${slope} × (Sleep Hours)`;
+    document.documentElement.style.setProperty("--pred-color", p.riskColor || "#6366f1");
+    setEl("predRiskPct",   p.riskPercent + "%");
+    setEl("predRiskLabel", p.riskCategory);
+
+    const bar = document.getElementById("predRiskBar");
+    if (bar) {
+        setTimeout(() => { bar.style.width = p.riskPercent + "%"; }, 50);
     }
 
-    // Update R² Score
-    const r2El = document.getElementById("metricR2");
-    if (r2El && lr) r2El.textContent = lr.r2_score !== undefined ? lr.r2_score.toFixed(4) : "—";
-
-    // Update MAE
-    const maeEl = document.getElementById("metricMAE");
-    if (maeEl && lr) maeEl.textContent = lr.mae !== undefined ? lr.mae.toFixed(2) : "—";
-
-    // Update RMSE
-    const rmseEl = document.getElementById("metricRMSE");
-    if (rmseEl && lr) rmseEl.textContent = lr.rmse !== undefined ? lr.rmse.toFixed(2) : "—";
-
-    // Update ANOVA results
-    const anovaBadge = document.getElementById("anovaBadge");
-    if (anovaBadge && anova) {
-        const f = anova.f_statistic !== undefined ? anova.f_statistic.toFixed(4) : "?";
-        const p = anova.p_value !== undefined ? anova.p_value.toFixed(4) : "?";
-        anovaBadge.textContent = `F = ${f}, p = ${p}`;
-        anovaBadge.className = anova.is_significant ? "kpi-badge badge-danger" : "kpi-badge badge-primary";
-    }
-
-    const anovaInterpEl = document.getElementById("anovaInterpretation");
-    if (anovaInterpEl && anova) {
-        const sig = anova.is_significant;
-        anovaInterpEl.innerHTML = `<strong>Conclusion:</strong> Since <em>p = ${anova.p_value !== undefined ? anova.p_value.toFixed(4) : "?"} ${sig ? "< 0.05" : "> 0.05"}</em>, we ${sig ? "<strong style=\"color:#ef4444\">reject</strong> the null hypothesis. Sleep duration has a statistically significant effect on mean blood glucose." : "fail to reject the null hypothesis. There is no statistically significant difference in mean blood sugar across sleep duration cohorts."}`;
-    }
-
-    // Update Shapiro-Wilk rows
-    const swBody = document.getElementById("shapiroWilkRows");
-    if (swBody && shapiro) {
-        const groupMap = {
-            "Low Sleep (<6h)":    { label: "Low Sleep", range: "<6h" },
-            "Medium Sleep (6-8h)":{ label: "Medium Sleep", range: "6-8h" },
-            "High Sleep (>=8h)": { label: "High Sleep", range: "≥8h" }
-        };
-
-        swBody.innerHTML = Object.entries(shapiro).map(([key, stat]) => {
-            const isNormal = stat.is_normal;
-            const normText = isNormal
-                ? `<strong style="color: #34d399">→ Normal (p > 0.05)</strong>`
-                : `<strong style="color: #f87171">→ Non-normal (p ≤ 0.05)</strong>`;
-            const label = groupMap[key] ? `${groupMap[key].label} (${groupMap[key].range})` : key;
-            return `<div style="display: flex; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 6px;">
-                <span>${label}, n=${stat.count}</span>
-                <span>W = ${stat.W.toFixed(4)}, p = ${stat.p.toFixed(4)} ${normText}</span>
-            </div>`;
-        }).join("");
-    }
-
-    // Update dataset size badge if present
-    const datasetBadge = document.getElementById("datasetSizeBadge");
-    if (datasetBadge && data.dataset_size) {
-        datasetBadge.textContent = `n = ${data.dataset_size} records`;
+    const recsEl = document.getElementById("predRecommendations");
+    if (recsEl && p.recommendations && p.recommendations.length) {
+        recsEl.innerHTML = p.recommendations.map(r =>
+            `<div style="padding:10px 14px; background:var(--bg-primary); border-radius:8px; border-left:3px solid ${p.riskColor}; font-size:13.5px; color:var(--text-secondary); line-height:1.6">${r}</div>`
+        ).join("");
     }
 }
